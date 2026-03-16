@@ -1,0 +1,13 @@
+.next
+node_modules
+coverage
+dist
+.vercel
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+dev.db
+dev.db-journal
+prisma/dev.db

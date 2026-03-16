@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Scenario {
+  id             String                   @id @default(cuid())
+  name           String
+  description    String
+  currency       String                   @default("USD")
+  seedDefault    Int
+  downtimeRate   Float                    @default(0)
+  operatingHours Json
+  staffRotation  Json
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  resourceConfig ScenarioResourceConfig?
+  services       ScenarioServiceConfig[]
+  demandProfile  ScenarioDemandProfile?
+  serviceMix     ScenarioServiceMix[]
+  runs           SimulationRun[]
+}
+
+model ScenarioResourceConfig {
+  id                   String   @id @default(cuid())
+  scenarioId           String   @unique
+  xRayMachines         Int
+  ctMachines           Int
+  mriMachines          Int
+  portableXRayMachines Int
+  ultrasoundMachines   Int
+  rooms                Int
+  changingRooms        Int
+  technicians          Int
+  supportStaff         Int
+  radiologists         Int
+  scenario             Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+}
+
+model ScenarioServiceConfig {
+  id                  String   @id @default(cuid())
+  scenarioId          String
+  modality            String
+  charge              Float
+  examDurationMinutes Int
+  prepDurationMinutes Int
+  cleanupMinutes      Int
+  reportingMinutes    Int
+  scenario            Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([scenarioId, modality])
+}
+
+model ScenarioDemandProfile {
+  id                         String   @id @default(cuid())
+  scenarioId                 String   @unique
+  baseDailyPatients          Int
+  hourlyDistribution         Json
+  dayOfWeekMultiplier        Json
+  inpatientFraction          Float
+  urgentFraction             Float
+  noShowRate                 Float
+  unexpectedLeaveRate        Float    @default(0)
+  repeatScanRate             Float
+  resultCommunicationMinutes Int
+  scenario                   Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+}
+
+model ScenarioServiceMix {
+  id         String   @id @default(cuid())
+  scenarioId String
+  modality   String
+  weight     Float
+  scenario   Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+
+  @@unique([scenarioId, modality])
+}
+
+model SimulationRun {
+  id          String                       @id @default(cuid())
+  scenarioId  String
+  horizonDays Int
+  seed        Int
+  status      String
+  startedAt   DateTime                     @default(now())
+  completedAt DateTime?
+  summary     Json?
+  scenario    Scenario                     @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+  metrics     SimulationRunMetric[]
+  snapshots   SimulationRunDailySnapshot[]
+}
+
+model SimulationRunMetric {
+  id          String        @id @default(cuid())
+  runId       String
+  modality    String
+  metricName  String
+  metricValue Float
+  run         SimulationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model SimulationRunDailySnapshot {
+  id                    String        @id @default(cuid())
+  runId                 String
+  dayIndex              Int
+  modality              String
+  throughput            Int
+  completedPatients     Int
+  deferredPatients      Int
+  revenue               Float
+  averageWaitMinutes    Float
+  averageResultMinutes  Float
+  p90WaitMinutes        Float
+  queuePeak             Int
+  machineUtilization    Float
+  technicianUtilization Float
+  radiologistUtilization Float
+  roomUtilization       Float
+  changingRoomUtilization Float
+  run                   SimulationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
