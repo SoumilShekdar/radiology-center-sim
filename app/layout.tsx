@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
+import { ThemeRegistry } from "@/components/theme-registry";
+import { Toaster } from "sonner";
 import "@/app/globals.css";
 
 export const metadata: Metadata = {
@@ -9,7 +12,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AppRouterCacheProvider options={{ enableCssLayer: true }}>
+          <ThemeRegistry>
+            {children}
+            <Toaster position="top-right" richColors />
+          </ThemeRegistry>
+        </AppRouterCacheProvider>
+      </body>
     </html>
   );
 }

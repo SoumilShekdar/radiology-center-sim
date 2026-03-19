@@ -5,6 +5,20 @@ import { MODALITY_LABELS } from "@/lib/constants";
 import { formatCurrency } from "@/lib/currency";
 import { prisma } from "@/lib/prisma";
 
+import Container from "@mui/material/Container";
+import Grid from "@mui/material/Grid";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import Stack from "@mui/material/Stack";
+import Button from "@mui/material/Button";
+import Box from "@mui/material/Box";
+import Table from "@mui/material/Table";
+import TableBody from "@mui/material/TableBody";
+import TableCell from "@mui/material/TableCell";
+import TableContainer from "@mui/material/TableContainer";
+import TableHead from "@mui/material/TableHead";
+import TableRow from "@mui/material/TableRow";
+
 function formatMinutes(value: number) {
   return `${Math.round(value)} min`;
 }
@@ -75,6 +89,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
   const currency = run.scenario.currency;
   const isPending = run.status === "QUEUED" || run.status === "RUNNING";
   const isFailed = run.status === "FAILED";
+
   const modalityRows = Object.entries(MODALITY_LABELS).map(([modality, label]) => {
     const throughputMetric = modalityMetrics.find((metric) => metric.modality === modality && metric.metricName === "throughput");
     const revenueMetric = modalityMetrics.find((metric) => metric.modality === modality && metric.metricName === "revenue");
@@ -99,269 +114,248 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     };
   });
 
-  if (isPending || isFailed) {
-    return (
-      <main className="page-shell">
-        <RunStatusPoller active={isPending} />
-        <section className="hero">
-          <div className="hero-card">
-            <div className="eyebrow">Simulation run</div>
-            <h1>{run.scenario.name}</h1>
-            <p>
-              {run.status === "QUEUED"
-                ? "The simulation is queued and will start shortly."
-                : run.status === "RUNNING"
-                  ? "The simulation is running in the background. You can leave this page and come back later."
-                  : summary.error ?? "The simulation failed before completing."}
-            </p>
-            <div className="button-row">
-              <Link className="secondary-button" href={`/scenarios/${run.scenarioId}`}>
-                Back to scenario
-              </Link>
-              <Link className="secondary-button" href="/">
-                Home
-              </Link>
-            </div>
-          </div>
-          <div className="panel stack">
-            <div className="eyebrow">Status</div>
-            <div className="metric-card">
-              <div className="metric-value">{run.status}</div>
-              <div className="muted">{isPending ? "This page refreshes automatically while the job is active." : "Open the scenario and try again if needed."}</div>
-            </div>
-          </div>
-        </section>
-
-        <section className="metric-grid">
-          <div className="metric-card">
-            <div className="eyebrow">Run type</div>
-            <div className="metric-value">{summary.mode === "MONTE_CARLO" ? "Monte Carlo" : "Single run"}</div>
-            <div className="muted">Horizon {run.horizonDays === 1 ? "1 day" : `${run.horizonDays} days`}</div>
-          </div>
-          <div className="metric-card">
-            <div className="eyebrow">Seed</div>
-            <div className="metric-value">{run.seed}</div>
-            <div className="muted">{summary.mode === "MONTE_CARLO" ? `Iterations ${summary.iterations ?? "pending"}` : "Reproducible run seed"}</div>
-          </div>
-          <div className="metric-card">
-            <div className="eyebrow">Started</div>
-            <div className="metric-value">{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(run.startedAt)}</div>
-            <div className="muted">Safe to navigate away while processing continues.</div>
-          </div>
-        </section>
-      </main>
-    );
-  }
 
   return (
-    <main className="page-shell">
-      <section className="hero">
-        <div className="hero-card">
-          <div className="eyebrow">Simulation result</div>
-          <h1>{run.scenario.name}</h1>
-          <p>
-            {summary.mode === "MONTE_CARLO" ? "Monte Carlo" : "Simulation"} • Horizon {run.horizonDays === 1 ? "1 day" : `${run.horizonDays} days`} • Seed {run.seed} • Completed{" "}
-            {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(run.completedAt ?? run.startedAt)}
-          </p>
-          <div className="button-row">
-            <Link className="secondary-button" href={`/scenarios/${run.scenarioId}`}>
-              Back to scenario
-            </Link>
-            <Link className="secondary-button" href="/">
-              Home
-            </Link>
-          </div>
-        </div>
-        <div className="panel stack">
-          <div className="eyebrow">Bottleneck signal</div>
-          <div className="metric-card">
-            <div className="metric-value">{summary.bottleneck}</div>
-            <div className="muted">Most common delaying or blocking resource observed in the run.</div>
-          </div>
-        </div>
-      </section>
+    <Container maxWidth="lg" sx={{ py: 6 }}>
+      {isPending && <RunStatusPoller active={isPending} />}
+      
+      <Card elevation={0} variant="outlined" sx={{ p: 4, mb: 4 }}>
+        <Typography variant="overline" color="secondary" gutterBottom>
+          {isPending || isFailed ? 'Simulation run' : 'Simulation result'}
+        </Typography>
+        <Typography variant="h1" gutterBottom sx={{ fontSize: { xs: '2.5rem', md: '3rem' } }}>{run.scenario.name}</Typography>
+        
+        <Typography variant="body1" color="text.secondary" paragraph>
+          {isPending || isFailed ? (
+            run.status === "QUEUED" ? "The simulation is queued and will start shortly." :
+            run.status === "RUNNING" ? "The simulation is running in the background. You can leave this page and come back later." :
+            summary.error ?? "The simulation failed before completing."
+          ) : (
+            <>{summary.mode === "MONTE_CARLO" ? "Monte Carlo" : "Simulation"} • Horizon {run.horizonDays === 1 ? "1 day" : `${run.horizonDays} days`} • Seed {run.seed} • Completed {new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(run.completedAt ?? run.startedAt)}</>
+          )}
+        </Typography>
 
-      {summary.mode === "MONTE_CARLO" ? (
-        <section className="metric-grid">
-          <div className="metric-card">
-            <div className="eyebrow">Iterations</div>
-            <div className="metric-value">{summary.iterations ?? 0}</div>
-            <div className="muted">Seeds {summary.seedStart} to {summary.seedEnd}</div>
-          </div>
-          <div className="metric-card">
-            <div className="eyebrow">Actual Revenue Band</div>
-            <div className="metric-value">{formatCurrency(summary.p50ActualRevenue ?? summary.actualRevenue, currency)}</div>
-            <div className="muted">P10 {formatCurrency(summary.p10ActualRevenue ?? 0, currency)} • P90 {formatCurrency(summary.p90ActualRevenue ?? 0, currency)}</div>
-          </div>
-          <div className="metric-card">
-            <div className="eyebrow">P90 Wait Band</div>
-            <div className="metric-value">{formatMinutes(summary.p50P90WaitMinutes ?? summary.p90WaitMinutes)}</div>
-            <div className="muted">P10 {formatMinutes(summary.p10P90WaitMinutes ?? 0)} • P90 {formatMinutes(summary.p90P90WaitMinutes ?? 0)}</div>
-          </div>
-          <div className="metric-card">
-            <div className="eyebrow">Completed Patients Band</div>
-            <div className="metric-value">{Math.round(summary.p50CompletedPatients ?? summary.completedPatients)}</div>
-            <div className="muted">P10 {Math.round(summary.p10CompletedPatients ?? 0)} • P90 {Math.round(summary.p90CompletedPatients ?? 0)}</div>
-          </div>
-        </section>
-      ) : null}
+        <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
+          <Button component={Link} href={`/scenarios/${run.scenarioId}`} variant="outlined">
+            Back to scenario
+          </Button>
+          <Button component={Link} href="/" variant="contained">
+            Home
+          </Button>
+        </Stack>
+      </Card>
 
-      <section className="metric-grid">
-        <div className="metric-card">
-          <div className="eyebrow">Run Seed</div>
-          <div className="metric-value">{summary.mode === "MONTE_CARLO" ? `${summary.seedStart}-${summary.seedEnd}` : run.seed}</div>
-          <div className="muted">{summary.mode === "MONTE_CARLO" ? "Seed range used for the sensitivity run." : "Reuse this seed to reproduce the same stochastic run."}</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Possible Revenue</div>
-          <div className="metric-value">{formatCurrency(summary.possibleRevenue, currency)}</div>
-          <div className="muted">Demand-based revenue if every patient is retained</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Maximum Revenue</div>
-          <div className="metric-value">{formatCurrency(summary.maximumRevenue, currency)}</div>
-          <div className="muted">Machine-only ceiling at full utilization</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Actual Revenue</div>
-          <div className="metric-value">{formatCurrency(summary.actualRevenue, currency)}</div>
-          <div className="muted">Completed patients {summary.completedPatients}</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Lost Revenue</div>
-          <div className="metric-value">{formatCurrency(summary.lostRevenue, currency)}</div>
-          <div className="muted">Possible minus actual</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Wait to Perform Service</div>
-          <div className="metric-value">{formatMinutes(summary.p50WaitMinutes)}</div>
-          <div className="muted">P90 {formatMinutes(summary.p90WaitMinutes)}</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Time to Result</div>
-          <div className="metric-value">{formatMinutes(summary.p50ResultMinutes)}</div>
-          <div className="muted">P90 {formatMinutes(summary.p90ResultMinutes)}</div>
-        </div>
-      </section>
+      {(isPending || isFailed) ? (
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <MetricCard title="Status" value={run.status} subtitle={isPending ? "This page refreshes automatically while the job is active." : "Open the scenario and try again if needed."} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <MetricCard title="Run type" value={summary.mode === "MONTE_CARLO" ? "Monte Carlo" : "Single run"} subtitle={`Horizon ${run.horizonDays === 1 ? "1 day" : `${run.horizonDays} days`}`} />
+          </Grid>
+          <Grid size={{ xs: 12, sm: 4 }}>
+            <MetricCard title="Seed" value={run.seed} subtitle={summary.mode === "MONTE_CARLO" ? `Iterations ${summary.iterations ?? "pending"}` : "Reproducible run seed"} />
+          </Grid>
+        </Grid>
+      ) : (
+        <Stack spacing={4}>
+          <Card elevation={0} variant="outlined" sx={{ p: 3, bgcolor: 'background.default' }}>
+            <Typography variant="overline" color="secondary" gutterBottom>Bottleneck signal</Typography>
+            <Typography variant="h3" sx={{ mt: 1, mb: 1 }}>{summary.bottleneck}</Typography>
+            <Typography variant="body2" color="text.secondary">Most common delaying or blocking resource observed in the run.</Typography>
+          </Card>
 
-      <section className="grid-2" style={{ marginTop: 18 }}>
-        <div className="table-card">
-          <h3>Model assumptions</h3>
-          <div className="stack">
-            <div className="muted">Rooms are explicit compatibility-controlled resources, not a pooled room count.</div>
-            <div className="muted">Portable X-Ray is modeled as a bedside workflow and does not require a room.</div>
-            <div className="muted">Changing-room use is modality-driven, with male, female, and unisex room pools.</div>
-            <div className="muted">Outpatient appointments: {run.scenario.appointmentPolicy && typeof run.scenario.appointmentPolicy === "object" && "enabled" in run.scenario.appointmentPolicy && run.scenario.appointmentPolicy.enabled ? "On" : "Off"}.</div>
-            <div className="muted">Service durations are sampled stochastically around configured average times.</div>
-          </div>
-        </div>
-        <div className="table-card">
-          <h3>Workflow summary</h3>
-          <div className="stack">
-            <div className="muted">Configured rooms: {run.scenario.resourceConfig?.rooms ?? 0}</div>
-            <div className="muted">Configured changing rooms: {run.scenario.resourceConfig?.changingRooms ?? 0}</div>
-            <div className="muted">Portable X-Ray machines: {run.scenario.resourceConfig?.portableXRayMachines ?? 0}</div>
-            <div className="muted">Radiologists can report outside scan hours if their shift coverage is present.</div>
-          </div>
-        </div>
-      </section>
+          {summary.mode === "MONTE_CARLO" && (
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <MetricCard title="Iterations" value={summary.iterations ?? 0} subtitle={`Seeds ${summary.seedStart} to ${summary.seedEnd}`} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <MetricCard title="Actual Revenue Band" value={formatCurrency(summary.p50ActualRevenue ?? summary.actualRevenue, currency)} subtitle={`P10 ${formatCurrency(summary.p10ActualRevenue ?? 0, currency)} • P90 ${formatCurrency(summary.p90ActualRevenue ?? 0, currency)}`} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <MetricCard title="P90 Wait Band" value={formatMinutes(summary.p50P90WaitMinutes ?? summary.p90WaitMinutes)} subtitle={`P10 ${formatMinutes(summary.p10P90WaitMinutes ?? 0)} • P90 ${formatMinutes(summary.p90P90WaitMinutes ?? 0)}`} />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <MetricCard title="Completed Patients Band" value={Math.round(summary.p50CompletedPatients ?? summary.completedPatients)} subtitle={`P10 ${Math.round(summary.p10CompletedPatients ?? 0)} • P90 ${Math.round(summary.p90CompletedPatients ?? 0)}`} />
+              </Grid>
+            </Grid>
+          )}
 
-      <section className="metric-grid" style={{ marginTop: 18 }}>
-        <div className="metric-card">
-          <div className="eyebrow">Lost due to wait</div>
-          <div className="metric-value">{formatCurrency(summary.lostRevenueDueToWait, currency)}</div>
-          <div className="muted">Patient abandonment window or missed same-day exam completion</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Lost due to results</div>
-          <div className="metric-value">{formatCurrency(summary.lostRevenueDueToResult, currency)}</div>
-          <div className="muted">Results not available within 24 hours of arrival</div>
-        </div>
-        <div className="metric-card">
-          <div className="eyebrow">Utilization snapshot</div>
-          <div className="metric-value">{formatPercent(summary.machineUtilization)}</div>
-          <div className="muted">
-            Tech {formatPercent(summary.technicianUtilization)} • Rad {formatPercent(summary.radiologistUtilization)}
-          </div>
-        </div>
-      </section>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Run Seed" value={summary.mode === "MONTE_CARLO" ? `${summary.seedStart}-${summary.seedEnd}` : run.seed} subtitle={summary.mode === "MONTE_CARLO" ? "Seed range used for sensitivity run." : "Reuse this seed to reproduce."} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Possible Revenue" value={formatCurrency(summary.possibleRevenue, currency)} subtitle="Demand-based if everyone retained" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Maximum Revenue" value={formatCurrency(summary.maximumRevenue, currency)} subtitle="Machine ceiling at full util" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Actual Revenue" value={formatCurrency(summary.actualRevenue, currency)} subtitle={`Completed patients ${summary.completedPatients}`} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard title="Lost Revenue" value={formatCurrency(summary.lostRevenue, currency)} subtitle="Possible minus actual" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard title="Wait to Perform" value={formatMinutes(summary.p50WaitMinutes)} subtitle={`P90 ${formatMinutes(summary.p90WaitMinutes)}`} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+              <MetricCard title="Time to Result" value={formatMinutes(summary.p50ResultMinutes)} subtitle={`P90 ${formatMinutes(summary.p90ResultMinutes)}`} />
+            </Grid>
+          </Grid>
 
-      <section className="dashboard-grid" style={{ marginTop: 18 }}>
-        <SimpleLineChart
-          title="Daily revenue"
-          valueFormatter={(value) => formatCurrency(value, currency)}
-          points={allSnapshots.map((snapshot) => ({
-            label: `D${snapshot.dayIndex + 1}`,
-            value: snapshot.revenue
-          }))}
-        />
-        <SimpleLineChart
-          title="Daily average wait to perform service"
-          color="#356c5c"
-          valueFormatter={(value) => `${Math.round(value)}m`}
-          points={allSnapshots.map((snapshot) => ({
-            label: `D${snapshot.dayIndex + 1}`,
-            value: snapshot.averageWaitMinutes
-          }))}
-        />
-      </section>
+          <Grid container spacing={4}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Box mb={2}>
+                <Typography variant="h2" gutterBottom>Model assumptions</Typography>
+              </Box>
+              <Card elevation={0} variant="outlined" sx={{ p: 3, height: '100%', bgcolor: 'background.default' }}>
+                <Stack spacing={2}>
+                  <Typography variant="body2" color="text.secondary">• Rooms are explicit compatibility-controlled resources, not a pooled room count.</Typography>
+                  <Typography variant="body2" color="text.secondary">• Portable X-Ray is modeled as a bedside workflow and does not require a room.</Typography>
+                  <Typography variant="body2" color="text.secondary">• Changing-room use is modality-driven, with male, female, and unisex room pools.</Typography>
+                  <Typography variant="body2" color="text.secondary">• Outpatient appointments: {run.scenario.appointmentPolicy && typeof run.scenario.appointmentPolicy === "object" && "enabled" in run.scenario.appointmentPolicy && run.scenario.appointmentPolicy.enabled ? "On" : "Off"}.</Typography>
+                  <Typography variant="body2" color="text.secondary">• Service durations are sampled stochastically around configured average times.</Typography>
+                </Stack>
+              </Card>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Box mb={2}>
+                <Typography variant="h2" gutterBottom>Workflow summary</Typography>
+              </Box>
+              <Card elevation={0} variant="outlined" sx={{ p: 3, height: '100%', bgcolor: 'background.default' }}>
+                <Stack spacing={2}>
+                  <Typography variant="body2" color="text.secondary">• Configured rooms: {run.scenario.resourceConfig?.rooms ?? 0}</Typography>
+                  <Typography variant="body2" color="text.secondary">• Configured changing rooms: {run.scenario.resourceConfig?.changingRooms ?? 0}</Typography>
+                  <Typography variant="body2" color="text.secondary">• Portable X-Ray machines: {run.scenario.resourceConfig?.portableXRayMachines ?? 0}</Typography>
+                  <Typography variant="body2" color="text.secondary">• Radiologists can report outside scan hours if their shift coverage is present.</Typography>
+                </Stack>
+              </Card>
+            </Grid>
+          </Grid>
 
-      <section className="grid-2" style={{ marginTop: 18 }}>
-        <div className="table-card">
-          <h3>Modality performance</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Modality</th>
-                <th>Throughput</th>
-                <th>Revenue</th>
-                <th>Avg wait</th>
-                <th>Machine util.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(MODALITY_LABELS).map(([modality, label]) => {
-                const row = modalityRows.find((item) => item.modality === modality);
-                return (
-                  <tr key={modality}>
-                    <td>{label}</td>
-                    <td>{Math.round(row?.throughput ?? 0)}</td>
-                    <td>{formatCurrency(row?.revenue ?? 0, currency)}</td>
-                    <td>{formatMinutes(row?.averageWaitMinutes ?? 0)}</td>
-                    <td>{formatPercent(row?.machineUtilization ?? 0)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <MetricCard title="Lost due to wait" value={formatCurrency(summary.lostRevenueDueToWait, currency)} subtitle="Patient abandonment window or missed same-day exam" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <MetricCard title="Lost due to results" value={formatCurrency(summary.lostRevenueDueToResult, currency)} subtitle="Results not available within 24 hours of arrival" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <MetricCard title="Utilization snapshot" value={formatPercent(summary.machineUtilization)} subtitle={`Tech ${formatPercent(summary.technicianUtilization)} • Rad ${formatPercent(summary.radiologistUtilization)}`} />
+            </Grid>
+          </Grid>
 
-        <div className="table-card">
-          <h3>Daily snapshots</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Day</th>
-                <th>Completed</th>
-                <th>Deferred</th>
-                <th>Revenue</th>
-                <th>P90 wait</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allSnapshots.slice(0, 16).map((snapshot) => (
-                <tr key={`${snapshot.dayIndex}-${snapshot.modality}`}>
-                  <td>{snapshot.dayIndex + 1}</td>
-                  <td>{snapshot.completedPatients}</td>
-                  <td>{snapshot.deferredPatients}</td>
-                  <td>{formatCurrency(snapshot.revenue, currency)}</td>
-                  <td>{formatMinutes(snapshot.p90WaitMinutes)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </main>
+          <Grid container spacing={4}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Box mb={2}>
+                <Typography variant="h2" gutterBottom>Daily revenue</Typography>
+              </Box>
+              <Card elevation={0} variant="outlined" sx={{ p: 3, pt: 4, height: 300 }}>
+                <SimpleLineChart
+                  title="Revenue by day"
+                  valueFormatter={(value) => formatCurrency(value, currency)}
+                  points={allSnapshots.map((snapshot) => ({
+                    label: `D${snapshot.dayIndex + 1}`,
+                    value: snapshot.revenue
+                  }))}
+                />
+              </Card>
+            </Grid>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Box mb={2}>
+                <Typography variant="h2" gutterBottom>Daily average wait</Typography>
+              </Box>
+              <Card elevation={0} variant="outlined" sx={{ p: 3, pt: 4, height: 300 }}>
+                <SimpleLineChart
+                  title="Wait by day"
+                  color="#356c5c"
+                  valueFormatter={(value) => `${Math.round(value)}m`}
+                  points={allSnapshots.map((snapshot) => ({
+                    label: `D${snapshot.dayIndex + 1}`,
+                    value: snapshot.averageWaitMinutes
+                  }))}
+                />
+              </Card>
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={4}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Box mb={2}>
+                <Typography variant="h2" gutterBottom>Modality performance</Typography>
+              </Box>
+              <TableContainer component={Card} elevation={0} variant="outlined">
+                <Table>
+                  <TableHead sx={{ bgcolor: 'background.default' }}>
+                    <TableRow>
+                      <TableCell>Modality</TableCell>
+                      <TableCell align="right">Throughput</TableCell>
+                      <TableCell align="right">Revenue</TableCell>
+                      <TableCell align="right">Avg wait</TableCell>
+                      <TableCell align="right">Machine util</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {Object.entries(MODALITY_LABELS).map(([modality, label]) => {
+                      const row = modalityRows.find((item) => item.modality === modality);
+                      return (
+                        <TableRow key={modality} hover>
+                          <TableCell component="th" scope="row">{label}</TableCell>
+                          <TableCell align="right">{Math.round(row?.throughput ?? 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(row?.revenue ?? 0, currency)}</TableCell>
+                          <TableCell align="right">{formatMinutes(row?.averageWaitMinutes ?? 0)}</TableCell>
+                          <TableCell align="right">{formatPercent(row?.machineUtilization ?? 0)}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Grid>
+
+            <Grid size={{ xs: 12, md: 6 }}>
+              <Box mb={2}>
+                <Typography variant="h2" gutterBottom>Daily snapshots</Typography>
+              </Box>
+              <TableContainer component={Card} elevation={0} variant="outlined">
+                <Table size="small">
+                  <TableHead sx={{ bgcolor: 'background.default' }}>
+                    <TableRow>
+                      <TableCell>Day</TableCell>
+                      <TableCell align="right">Completed</TableCell>
+                      <TableCell align="right">Deferred</TableCell>
+                      <TableCell align="right">Revenue</TableCell>
+                      <TableCell align="right">P90 wait</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {allSnapshots.slice(0, 16).map((snapshot) => (
+                      <TableRow key={`${snapshot.dayIndex}-${snapshot.modality}`} hover>
+                        <TableCell>{snapshot.dayIndex + 1}</TableCell>
+                        <TableCell align="right">{snapshot.completedPatients}</TableCell>
+                        <TableCell align="right">{snapshot.deferredPatients}</TableCell>
+                        <TableCell align="right">{formatCurrency(snapshot.revenue, currency)}</TableCell>
+                        <TableCell align="right">{formatMinutes(snapshot.p90WaitMinutes)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Grid>
+          </Grid>
+        </Stack>
+      )}
+    </Container>
   );
 }
+
+const MetricCard = ({ title, value, subtitle }: { title: string, value: string | number, subtitle: React.ReactNode }) => (
+  <Card elevation={0} variant="outlined" sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Typography variant="overline" color="secondary" gutterBottom sx={{ lineHeight: 1.2 }}>{title}</Typography>
+    <Typography variant="h3" sx={{ mb: 1, mt: 1 }}>{value}</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mt: 'auto' }}>{subtitle}</Typography>
+  </Card>
+);
