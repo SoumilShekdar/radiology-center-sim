@@ -64,6 +64,14 @@ describe("radiology simulator", () => {
     expect(expandedRun.summary.averageResultMinutes).toBeLessThan(baselineRun.summary.averageResultMinutes);
   });
 
+  test("different seeds produce different outcomes once stochastic durations are sampled", () => {
+    const scenario = cloneScenario();
+    const first = runSimulation(scenario, 7, 9001);
+    const second = runSimulation(scenario, 7, 9002);
+
+    expect(first.summary).not.toEqual(second.summary);
+  });
+
   test("higher unexpected leave rate increases lost revenue from unexpected leaves", () => {
     const lowLeave = cloneScenario();
     lowLeave.demandProfile.unexpectedLeaveRate = 0;
@@ -91,14 +99,90 @@ describe("radiology simulator", () => {
     expect(reducedRun.summary.deferredPatients).toBeGreaterThan(baselineRun.summary.deferredPatients);
   });
 
-  test("higher inpatient share improves inpatient waits relative to outpatient waits", () => {
-    const mixed = cloneScenario();
-    mixed.demandProfile.inpatientFraction = 0.45;
+  test("inpatient priority reduces inpatient waits under congestion", () => {
+    const congested = cloneScenario();
+    congested.demandProfile.baseDailyPatients = 180;
+    congested.demandProfile.inpatientFraction = 0.5;
+    congested.demandProfile.urgentFraction = 0;
+    congested.demandProfile.repeatScanRate = 0;
+    congested.resourceConfig.xRayMachines = 1;
+    congested.resourceConfig.ctMachines = 0;
+    congested.resourceConfig.mriMachines = 0;
+    congested.resourceConfig.portableXRayMachines = 0;
+    congested.resourceConfig.ultrasoundMachines = 0;
+    congested.resourceConfig.rooms = 1;
+    congested.resourceConfig.technicians = 1;
+    congested.resourceConfig.supportStaff = 2;
+    congested.resourceConfig.radiologists = 1;
+    congested.serviceMix = congested.serviceMix.map((item) => ({
+      ...item,
+      weight: item.modality === "XRAY" ? 1 : 0
+    }));
 
-    const run = runSimulation(mixed, 7, 66);
+    const run = runSimulation(congested, 7, 66);
     const inpatientWait = run.metrics.find((metric) => metric.metricName === "inpatientAverageWaitMinutes")?.metricValue ?? 0;
     const outpatientWait = run.metrics.find((metric) => metric.metricName === "outpatientAverageWaitMinutes")?.metricValue ?? 0;
 
     expect(inpatientWait).toBeLessThanOrEqual(outpatientWait);
+  });
+
+  test("zero result communication minutes removes communication delay without breaking completion", () => {
+    const scenario = cloneScenario();
+    scenario.demandProfile.resultCommunicationMinutes = 0;
+
+    const run = runSimulation(scenario, 7, 333);
+
+    expect(run.summary.completedPatients).toBeGreaterThan(0);
+    expect(run.summary.averageResultMinutes).toBeGreaterThanOrEqual(0);
+  });
+
+  test("daily snapshots keep day-specific queue and utilization values", () => {
+    const scenario = cloneScenario();
+    const run = runSimulation(scenario, 7, 444);
+    const allSnapshots = run.snapshots.filter((snapshot) => snapshot.modality === "ALL");
+
+    expect(allSnapshots).toHaveLength(7);
+    expect(new Set(allSnapshots.map((snapshot) => snapshot.dayIndex)).size).toBe(7);
+    expect(allSnapshots.every((snapshot) => snapshot.queuePeak >= 0)).toBe(true);
+    expect(allSnapshots.every((snapshot) => snapshot.machineUtilization >= 0 && snapshot.machineUtilization <= 100)).toBe(true);
+  });
+
+  test("after-hours radiologist coverage can reduce lost revenue from result backlogs", () => {
+    const baseline = cloneScenario();
+    baseline.operatingHours = baseline.operatingHours.map((entry, index) =>
+      index === 0 ? entry : { ...entry, openHour: 8, closeHour: 16 }
+    );
+    baseline.demandProfile.baseDailyPatients = 150;
+    baseline.resourceConfig.radiologists = 1;
+    baseline.demandProfile.resultCommunicationMinutes = 0;
+    baseline.serviceConfigs = baseline.serviceConfigs.map((service) => ({
+      ...service,
+      reportingMinutes: Math.round(service.reportingMinutes * 1.8)
+    }));
+    baseline.staffRotation.radiologists = baseline.staffRotation.radiologists.map((point) => ({
+      ...point,
+      coverage: point.hour >= 8 && point.hour < 16 ? 1 : 0
+    }));
+
+    const overnightReporting = cloneScenario();
+    overnightReporting.operatingHours = overnightReporting.operatingHours.map((entry, index) =>
+      index === 0 ? entry : { ...entry, openHour: 8, closeHour: 16 }
+    );
+    overnightReporting.demandProfile.baseDailyPatients = 150;
+    overnightReporting.resourceConfig.radiologists = 1;
+    overnightReporting.demandProfile.resultCommunicationMinutes = 0;
+    overnightReporting.serviceConfigs = overnightReporting.serviceConfigs.map((service) => ({
+      ...service,
+      reportingMinutes: Math.round(service.reportingMinutes * 1.8)
+    }));
+    overnightReporting.staffRotation.radiologists = overnightReporting.staffRotation.radiologists.map((point) => ({
+      ...point,
+      coverage: point.hour >= 8 && point.hour < 22 ? 1 : 0
+    }));
+
+    const baselineRun = runSimulation(baseline, 7, 717);
+    const overnightRun = runSimulation(overnightReporting, 7, 717);
+
+    expect(overnightRun.summary.lostRevenueDueToResult).toBeLessThanOrEqual(baselineRun.summary.lostRevenueDueToResult);
   });
 });

@@ -35,6 +35,61 @@ function commonServiceConfigs() {
   ] as ScenarioInput["serviceConfigs"];
 }
 
+function buildRoomConfigs(count: number): ScenarioInput["workflowConfig"]["roomConfigs"] {
+  const templates: Array<{ name: string; supportedModalities: ScenarioInput["workflowConfig"]["roomConfigs"][number]["supportedModalities"]; dedicatedModality: ScenarioInput["workflowConfig"]["roomConfigs"][number]["dedicatedModality"] }> = [
+    { name: "General X-Ray 1", supportedModalities: ["XRAY"], dedicatedModality: "XRAY" },
+    { name: "General X-Ray 2", supportedModalities: ["XRAY"], dedicatedModality: "XRAY" },
+    { name: "CT Suite", supportedModalities: ["CT"], dedicatedModality: "CT" },
+    { name: "MRI Suite", supportedModalities: ["MRI"], dedicatedModality: "MRI" },
+    { name: "Ultrasound 1", supportedModalities: ["ULTRASOUND"], dedicatedModality: "ULTRASOUND" },
+    { name: "Ultrasound 2", supportedModalities: ["ULTRASOUND"], dedicatedModality: "ULTRASOUND" },
+    { name: "Flex Room 1", supportedModalities: ["XRAY", "CT", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "Flex Room 2", supportedModalities: ["XRAY", "CT", "MRI", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "Flex Room 3", supportedModalities: ["XRAY", "CT", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "Flex Room 4", supportedModalities: ["XRAY", "MRI", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "Procedure Room A", supportedModalities: ["CT", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "Procedure Room B", supportedModalities: ["CT", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "General Imaging A", supportedModalities: ["XRAY", "CT", "ULTRASOUND"], dedicatedModality: "NONE" },
+    { name: "General Imaging B", supportedModalities: ["XRAY", "MRI", "ULTRASOUND"], dedicatedModality: "NONE" }
+  ];
+
+  return Array.from({ length: count }, (_, index) => {
+    const template = templates[index] ?? {
+      name: `Flex Room ${index + 1}`,
+      supportedModalities: ["XRAY", "CT", "MRI", "ULTRASOUND"] as const,
+      dedicatedModality: "NONE" as const
+    };
+    return {
+      id: `room-${index + 1}`,
+      name: template.name,
+      supportedModalities: [...template.supportedModalities],
+      dedicatedModality: template.dedicatedModality
+    };
+  });
+}
+
+function buildChangingRoomConfigs(count: number): ScenarioInput["workflowConfig"]["changingRoomConfigs"] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `changing-room-${index + 1}`,
+    name: index === 0 ? "Women Changing" : index === 1 ? "Men Changing" : `Unisex Changing ${index - 1}`,
+    gender: index === 0 ? "FEMALE" : index === 1 ? "MALE" : "UNISEX"
+  }));
+}
+
+function buildWorkflowConfig(rooms: number, changingRooms: number): ScenarioInput["workflowConfig"] {
+  return {
+    roomConfigs: buildRoomConfigs(rooms),
+    changingRoomConfigs: buildChangingRoomConfigs(changingRooms),
+    changingRoomByModality: {
+      XRAY: false,
+      CT: true,
+      MRI: true,
+      PORTABLE_XRAY: false,
+      ULTRASOUND: false
+    }
+  };
+}
+
 export const SAMPLE_SCENARIOS: ScenarioInput[] = [
   {
     name: "Small Community Hospital",
@@ -60,17 +115,25 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       supportStaff: 3,
       radiologists: 2
     },
+    workflowConfig: buildWorkflowConfig(4, 2),
     serviceConfigs: commonServiceConfigs(),
     demandProfile: {
       baseDailyPatients: 48,
       hourlyDistribution: baseHourlyDistribution,
       dayOfWeekMultiplier: dayMultiplier,
       inpatientFraction: 0.22,
+      femaleFraction: 0.52,
       urgentFraction: 0.08,
       noShowRate: 0.05,
       unexpectedLeaveRate: 0.015,
       repeatScanRate: 0.02,
       resultCommunicationMinutes: 12
+    },
+    appointmentPolicy: {
+      enabled: false,
+      outpatientScheduledFraction: 0.7,
+      arrivalVarianceMinutes: 15,
+      earlyArrivalMinutes: 20
     },
     serviceMix: [
       { modality: "XRAY", weight: 0.38 },
@@ -104,6 +167,7 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       supportStaff: 6,
       radiologists: 4
     },
+    workflowConfig: buildWorkflowConfig(8, 4),
     serviceConfigs: commonServiceConfigs().map((item) =>
       item.modality === "MRI" ? { ...item, charge: 950 } : item
     ),
@@ -112,11 +176,18 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       hourlyDistribution: baseHourlyDistribution,
       dayOfWeekMultiplier: dayMultiplier,
       inpatientFraction: 0.28,
+      femaleFraction: 0.52,
       urgentFraction: 0.11,
       noShowRate: 0.04,
       unexpectedLeaveRate: 0.012,
       repeatScanRate: 0.025,
       resultCommunicationMinutes: 10
+    },
+    appointmentPolicy: {
+      enabled: false,
+      outpatientScheduledFraction: 0.72,
+      arrivalVarianceMinutes: 15,
+      earlyArrivalMinutes: 20
     },
     serviceMix: [
       { modality: "XRAY", weight: 0.34 },
@@ -150,6 +221,7 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       supportStaff: 10,
       radiologists: 8
     },
+    workflowConfig: buildWorkflowConfig(14, 8),
     serviceConfigs: commonServiceConfigs().map((item) =>
       item.modality === "CT"
         ? { ...item, charge: 465 }
@@ -162,11 +234,18 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       hourlyDistribution: baseHourlyDistribution,
       dayOfWeekMultiplier: dayMultiplier,
       inpatientFraction: 0.36,
+      femaleFraction: 0.51,
       urgentFraction: 0.16,
       noShowRate: 0.03,
       unexpectedLeaveRate: 0.018,
       repeatScanRate: 0.03,
       resultCommunicationMinutes: 9
+    },
+    appointmentPolicy: {
+      enabled: false,
+      outpatientScheduledFraction: 0.76,
+      arrivalVarianceMinutes: 20,
+      earlyArrivalMinutes: 25
     },
     serviceMix: [
       { modality: "XRAY", weight: 0.3 },

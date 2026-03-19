@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { DAY_NAMES, HORIZON_OPTIONS, MODALITY_LABELS } from "@/lib/constants";
-import { runSimulationAction, saveScenarioAction } from "@/lib/actions";
+import { runMonteCarloAction, runSimulationAction, saveScenarioAction } from "@/lib/actions";
 import { SUPPORTED_CURRENCIES } from "@/lib/currency";
 import { DEFAULT_SCENARIO, SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
 import type { ScenarioInput } from "@/lib/types";
@@ -72,6 +72,37 @@ function coverageFromCounts(counts: number[], total: number) {
     hour,
     coverage: total === 0 ? 0 : clamp(count, 0, total) / safeTotal
   }));
+}
+
+function syncRoomConfigs(current: ScenarioInput["workflowConfig"]["roomConfigs"], nextCount: number) {
+  const trimmed = current.slice(0, nextCount);
+  if (trimmed.length === nextCount) {
+    return trimmed;
+  }
+
+  const additions = Array.from({ length: nextCount - trimmed.length }, (_, index) => ({
+    id: `room-${trimmed.length + index + 1}`,
+    name: `Room ${trimmed.length + index + 1}`,
+    supportedModalities: ["XRAY", "CT", "MRI", "ULTRASOUND"] as ScenarioInput["workflowConfig"]["roomConfigs"][number]["supportedModalities"],
+    dedicatedModality: "NONE" as const
+  }));
+
+  return [...trimmed, ...additions];
+}
+
+function syncChangingRoomConfigs(current: ScenarioInput["workflowConfig"]["changingRoomConfigs"], nextCount: number) {
+  const trimmed = current.slice(0, nextCount);
+  if (trimmed.length === nextCount) {
+    return trimmed;
+  }
+
+  const additions = Array.from({ length: nextCount - trimmed.length }, (_, index) => ({
+    id: `changing-room-${trimmed.length + index + 1}`,
+    name: `Changing Room ${trimmed.length + index + 1}`,
+    gender: "UNISEX" as const
+  }));
+
+  return [...trimmed, ...additions];
 }
 
 function HourlyDemandChart({
@@ -142,10 +173,14 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
   const [scenario, setScenario] = useState<ScenarioInput>(initialScenario);
   const [isSaving, setIsSaving] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  const [queuedRunId, setQueuedRunId] = useState<string | null>(null);
   const [runSeedManuallyEdited, setRunSeedManuallyEdited] = useState(false);
+  const [activeRunKind, setActiveRunKind] = useState<"seed" | "random" | "montecarlo" | null>(null);
+  const [isRunPending, startRunTransition] = useTransition();
   const [runConfig, setRunConfig] = useState({
     horizonDays: 7,
-    seed: initialScenario.seedDefault
+    seed: initialScenario.seedDefault,
+    monteCarloIterations: 25
   });
 
   useEffect(() => {
@@ -271,9 +306,33 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
     formData.set("horizonDays", String(runConfig.horizonDays));
     formData.set("seed", String(seedToUse));
 
-    startTransition(async () => {
+    startRunTransition(async () => {
       const result = await runSimulationAction(formData);
-      router.push(`/runs/${result.runId}`);
+      setQueuedRunId(result.runId);
+      setFlash("Simulation started in the background.");
+      setActiveRunKind(null);
+      router.refresh();
+    });
+  };
+
+  const saveAndRunMonteCarlo = async (seedToUse: number) => {
+    const scenarioId = scenario.id ?? (await submitScenario());
+    if (!scenarioId) {
+      return;
+    }
+
+    const formData = new FormData();
+    formData.set("scenarioId", scenarioId);
+    formData.set("horizonDays", String(runConfig.horizonDays));
+    formData.set("seed", String(seedToUse));
+    formData.set("iterations", String(runConfig.monteCarloIterations));
+
+    startRunTransition(async () => {
+      const result = await runMonteCarloAction(formData);
+      setQueuedRunId(result.runId);
+      setFlash("Monte Carlo run started in the background.");
+      setActiveRunKind(null);
+      router.refresh();
     });
   };
 
@@ -418,12 +477,27 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                 type="number"
                 min="0"
                 value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const nextValue = Number(event.target.value);
                   updateScenario("resourceConfig", {
                     ...scenario.resourceConfig,
-                    [key]: Number(event.target.value)
-                  })
-                }
+                    [key]: nextValue
+                  });
+
+                  if (key === "rooms") {
+                    updateScenario("workflowConfig", {
+                      ...scenario.workflowConfig,
+                      roomConfigs: syncRoomConfigs(scenario.workflowConfig.roomConfigs, nextValue)
+                    });
+                  }
+
+                  if (key === "changingRooms") {
+                    updateScenario("workflowConfig", {
+                      ...scenario.workflowConfig,
+                      changingRoomConfigs: syncChangingRoomConfigs(scenario.workflowConfig.changingRoomConfigs, nextValue)
+                    });
+                  }
+                }}
               />
             </div>
           ))}
@@ -468,7 +542,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         <div>
           <div className="eyebrow">Advanced Options</div>
           <h2 className="section-title">Tune the detailed operating model</h2>
-          <p className="muted">This page is for department-level assumptions like operating hours, staffing by hour, demand curves, service mix, and modality timings.</p>
+          <p className="muted">This page is for department-level assumptions like operating hours, staffing by hour, demand curves, service mix, and average modality timings. The simulator samples patient-level duration variability around those averages.</p>
         </div>
         <div className="button-row">
           <button type="button" className="secondary-button" onClick={goToBasic}>
@@ -574,6 +648,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
           <div className="flash" style={{ background: "rgba(181, 93, 56, 0.08)", color: "var(--ink)" }}>
             Auto-fill uses a simple planning rule: 8-hour shifts and 6 working days per week for each team member, spread across the open day.
           </div>
+          <p className="muted">Radiologists are allowed to report outside scan operating hours if you staff them in those hours, which lets the model represent evening or overnight reporting backlogs being cleared.</p>
           <div className="button-row">
             <button type="button" className="secondary-button" onClick={applyEightHourShiftPreset}>
               Auto-fill 8h / 6d shifts
@@ -705,6 +780,22 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                     updateScenario("demandProfile", {
                       ...scenario.demandProfile,
                       inpatientFraction: Number(event.target.value)
+                    })
+                  }
+                />
+              </div>
+              <div className="field">
+                <label>Female patient fraction</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={scenario.demandProfile.femaleFraction}
+                  onChange={(event) =>
+                    updateScenario("demandProfile", {
+                      ...scenario.demandProfile,
+                      femaleFraction: Number(event.target.value)
                     })
                   }
                 />
@@ -949,7 +1040,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         description="Tune prep, exam, cleanup, and report times. Defaults are meant to feel like industry-style operational baselines."
       >
         <div className="flash" style={{ background: "rgba(53, 108, 92, 0.08)", color: "var(--ink)" }}>
-          Workflow in this version: support staff greet and route the patient, only CT requires a changing room, technicians perform one scan at a time, and radiologist report time is configurable per modality. Prep, cleanup, reporting, and exam times are intended as industry-style operational defaults that you can tune.
+          Workflow in this version: support staff greet and route the patient, only CT requires a changing room, technicians perform one scan at a time, and radiologist report time is configurable per modality. Prep, cleanup, reporting, and exam times are treated as averages, and the engine samples patient-level variation around them during each run.
         </div>
         <div className="service-config-grid">
           {scenario.serviceConfigs.map((service, index) => (
@@ -1026,12 +1117,247 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
           ))}
         </div>
       </SectionBlock>
+
+      <SectionBlock
+        kicker="Section 9"
+        title="Workflow Routing"
+        description="Define which rooms can host each modality, which modalities require changing rooms, and how changing rooms are gender-assigned."
+      >
+        <div className="stack">
+          <div className="flash" style={{ background: "rgba(53, 108, 92, 0.08)", color: "var(--ink)" }}>
+            Portable X-Ray is modeled as a bedside/mobile workflow by default and does not consume a procedure room. All other modalities must route through a compatible room definition below.
+          </div>
+          <div className="service-config-grid">
+            {scenario.workflowConfig.roomConfigs.map((room, index) => (
+              <div className="scenario-card stack" key={room.id}>
+                <strong>{room.name}</strong>
+                <div className="field">
+                  <label>Room name</label>
+                  <input
+                    value={room.name}
+                    onChange={(event) =>
+                      updateScenario("workflowConfig", {
+                        ...scenario.workflowConfig,
+                        roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, name: event.target.value } : item
+                        )
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Dedicated modality</label>
+                  <select
+                    value={room.dedicatedModality}
+                    onChange={(event) =>
+                      updateScenario("workflowConfig", {
+                        ...scenario.workflowConfig,
+                        roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, dedicatedModality: event.target.value as typeof item.dedicatedModality } : item
+                        )
+                      })
+                    }
+                  >
+                    <option value="NONE">Flexible</option>
+                    {Object.entries(MODALITY_LABELS)
+                      .filter(([modality]) => modality !== "PORTABLE_XRAY")
+                      .map(([modality, label]) => (
+                        <option key={modality} value={modality}>
+                          {label}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Compatible modalities</label>
+                  <div className="button-row">
+                    {Object.entries(MODALITY_LABELS)
+                      .filter(([modality]) => modality !== "PORTABLE_XRAY")
+                      .map(([modality, label]) => {
+                        const typedModality = modality as ScenarioInput["serviceMix"][number]["modality"];
+                        const enabled = room.supportedModalities.includes(typedModality);
+                        return (
+                          <button
+                            key={`${room.id}-${modality}`}
+                            type="button"
+                            className="secondary-button"
+                            onClick={() =>
+                              updateScenario("workflowConfig", {
+                                ...scenario.workflowConfig,
+                                roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? {
+                                        ...item,
+                                        supportedModalities: enabled
+                                          ? item.supportedModalities.filter((value) => value !== modality)
+                                          : [...item.supportedModalities, typedModality]
+                                      }
+                                    : item
+                                )
+                              })
+                            }
+                          >
+                            {enabled ? `On: ${label}` : `Off: ${label}`}
+                          </button>
+                        );
+                      })}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="service-config-grid">
+            {scenario.workflowConfig.changingRoomConfigs.map((room, index) => (
+              <div className="scenario-card stack" key={room.id}>
+                <strong>{room.name}</strong>
+                <div className="field">
+                  <label>Changing room name</label>
+                  <input
+                    value={room.name}
+                    onChange={(event) =>
+                      updateScenario("workflowConfig", {
+                        ...scenario.workflowConfig,
+                        changingRoomConfigs: scenario.workflowConfig.changingRoomConfigs.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, name: event.target.value } : item
+                        )
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label>Assigned gender</label>
+                  <select
+                    value={room.gender}
+                    onChange={(event) =>
+                      updateScenario("workflowConfig", {
+                        ...scenario.workflowConfig,
+                        changingRoomConfigs: scenario.workflowConfig.changingRoomConfigs.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, gender: event.target.value as typeof item.gender } : item
+                        )
+                      })
+                    }
+                  >
+                    <option value="FEMALE">Female</option>
+                    <option value="MALE">Male</option>
+                    <option value="UNISEX">Unisex</option>
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="field-grid">
+            {Object.entries(MODALITY_LABELS).map(([modality, label]) => (
+              <div className="field" key={`changing-rule-${modality}`}>
+                <label>{label} requires changing room</label>
+                <select
+                  value={String(scenario.workflowConfig.changingRoomByModality[modality as ScenarioInput["serviceMix"][number]["modality"]])}
+                  onChange={(event) =>
+                    updateScenario("workflowConfig", {
+                      ...scenario.workflowConfig,
+                      changingRoomByModality: {
+                        ...scenario.workflowConfig.changingRoomByModality,
+                        [modality]: event.target.value === "true"
+                      }
+                    })
+                  }
+                >
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      </SectionBlock>
+
+      <SectionBlock
+        kicker="Section 10"
+        title="Appointments"
+        description="Toggle scheduled outpatient appointments versus pure walk-in demand."
+      >
+        <div className="field-grid">
+          <div className="field">
+            <label>Scheduled outpatient appointments</label>
+            <select
+              value={String(scenario.appointmentPolicy.enabled)}
+              onChange={(event) =>
+                updateScenario("appointmentPolicy", {
+                  ...scenario.appointmentPolicy,
+                  enabled: event.target.value === "true"
+                })
+              }
+            >
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Scheduled fraction of outpatients</label>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value={scenario.appointmentPolicy.outpatientScheduledFraction}
+              onChange={(event) =>
+                updateScenario("appointmentPolicy", {
+                  ...scenario.appointmentPolicy,
+                  outpatientScheduledFraction: Number(event.target.value)
+                })
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Early arrival minutes</label>
+            <input
+              type="number"
+              min="0"
+              max="120"
+              value={scenario.appointmentPolicy.earlyArrivalMinutes}
+              onChange={(event) =>
+                updateScenario("appointmentPolicy", {
+                  ...scenario.appointmentPolicy,
+                  earlyArrivalMinutes: Number(event.target.value)
+                })
+              }
+            />
+          </div>
+          <div className="field">
+            <label>Appointment arrival variance minutes</label>
+            <input
+              type="number"
+              min="0"
+              max="180"
+              value={scenario.appointmentPolicy.arrivalVarianceMinutes}
+              onChange={(event) =>
+                updateScenario("appointmentPolicy", {
+                  ...scenario.appointmentPolicy,
+                  arrivalVarianceMinutes: Number(event.target.value)
+                })
+              }
+            />
+          </div>
+        </div>
+      </SectionBlock>
     </>
   );
 
   return (
     <div className="stack">
-      {flash ? <div className="flash">{flash}</div> : null}
+      {flash ? (
+        <div className="flash">
+          <div>{flash}</div>
+          {queuedRunId ? (
+            <div className="button-row" style={{ marginTop: 8 }}>
+              <Link className="secondary-button" href={`/runs/${queuedRunId}`}>
+                Open run status
+              </Link>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {viewMode === "basic" ? basicSections : advancedSections}
 
       <section className="panel stack">
@@ -1065,6 +1391,23 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
             />
             <div className="helper-copy">Use this for reproducible runs. The same scenario and seed will produce the same result.</div>
           </div>
+          <div className="field">
+            <label>Monte Carlo iterations</label>
+            <input
+              type="number"
+              min="5"
+              max="250"
+              step="5"
+              value={runConfig.monteCarloIterations}
+              onChange={(event) =>
+                setRunConfig((current) => ({
+                  ...current,
+                  monteCarloIterations: Math.max(5, Number(event.target.value) || 25)
+                }))
+              }
+            />
+            <div className="helper-copy">Runs a seed sweep from the base seed to show percentile bands instead of a single-seed point estimate.</div>
+          </div>
         </div>
         <div className="button-row">
           {viewMode === "basic" ? (
@@ -1079,19 +1422,39 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
           <button type="button" className="button" disabled={isSaving} onClick={() => void submitScenario()}>
             {mode === "create" ? "Create scenario" : "Save scenario"}
           </button>
-          <button type="button" className="secondary-button" disabled={isSaving} onClick={() => void saveAndRun(runConfig.seed)}>
-            Run w/ Seed
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={isSaving || isRunPending}
+            onClick={() => {
+              setActiveRunKind("seed");
+              void saveAndRun(runConfig.seed);
+            }}
+          >
+            {isRunPending && activeRunKind === "seed" ? "Queueing Seeded Run..." : "Start Seeded Run"}
           </button>
           <button
             type="button"
             className="secondary-button"
-            disabled={isSaving}
+            disabled={isSaving || isRunPending}
             onClick={() => {
+              setActiveRunKind("montecarlo");
+              void saveAndRunMonteCarlo(runConfig.seed);
+            }}
+          >
+            {isRunPending && activeRunKind === "montecarlo" ? "Queueing Monte Carlo..." : "Start Monte Carlo"}
+          </button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={isSaving || isRunPending}
+            onClick={() => {
+              setActiveRunKind("random");
               const randomSeed = generateRandomSeed();
               void saveAndRun(randomSeed);
             }}
           >
-            Run w/ Random Seed
+            {isRunPending && activeRunKind === "random" ? "Queueing Random Run..." : "Start Random Run"}
           </button>
           <button type="button" className="secondary-button" onClick={() => setScenario(DEFAULT_SCENARIO)}>
             Reset to sample baseline

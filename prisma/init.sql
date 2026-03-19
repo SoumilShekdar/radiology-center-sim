@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS "Scenario" (
     "downtimeRate" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "operatingHours" JSONB NOT NULL,
     "staffRotation" JSONB NOT NULL,
+    "workflowConfig" JSONB,
+    "appointmentPolicy" JSONB,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL
 );
@@ -46,6 +48,7 @@ CREATE TABLE IF NOT EXISTS "ScenarioDemandProfile" (
     "hourlyDistribution" JSONB NOT NULL,
     "dayOfWeekMultiplier" JSONB NOT NULL,
     "inpatientFraction" DOUBLE PRECISION NOT NULL,
+    "femaleFraction" DOUBLE PRECISION NOT NULL DEFAULT 0.5,
     "urgentFraction" DOUBLE PRECISION NOT NULL,
     "noShowRate" DOUBLE PRECISION NOT NULL,
     "unexpectedLeaveRate" DOUBLE PRECISION NOT NULL DEFAULT 0,
