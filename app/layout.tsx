@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { AppRouterCacheProvider } from "@mui/material-nextjs/v15-appRouter";
+import { ThemeRegistry } from "@/components/theme-registry";
 import { Toaster } from "sonner";
 import "@/app/globals.css";
-
-const inter = Inter({ subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
   title: "Radiology Department Simulator",
@@ -13,9 +12,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        {children}
-        <Toaster position="top-right" richColors />
+      <body>
+        <AppRouterCacheProvider options={{ enableCssLayer: true }}>
+          <ThemeRegistry>
+            {children}
+            <Toaster position="top-right" richColors />
+          </ThemeRegistry>
+        </AppRouterCacheProvider>
       </body>
     </html>
   );

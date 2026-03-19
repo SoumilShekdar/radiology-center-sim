@@ -1,14 +1,31 @@
 "use client";
 
+import { 
+  Button, 
+  Accordion, 
+  AccordionSummary, 
+  AccordionDetails, 
+  Typography, 
+  TextField, 
+  Select, 
+  MenuItem, 
+  FormControl, 
+  InputLabel, 
+  Box, 
+  Stack, 
+  Paper
+} from "@mui/material";
+import Grid from "@mui/material/Grid";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { DAY_NAMES, HORIZON_OPTIONS, MODALITY_LABELS } from "@/lib/constants";
 import { runMonteCarloAction, runSimulationAction, saveScenarioAction } from "@/lib/actions";
 import { SUPPORTED_CURRENCIES } from "@/lib/currency";
 import { DEFAULT_SCENARIO, SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
 import type { ScenarioInput } from "@/lib/types";
-import { toast } from "sonner";
+
 
 type Props = {
   initialScenario: ScenarioInput;
@@ -155,17 +172,18 @@ function SectionBlock({
   children: React.ReactNode;
 }) {
   return (
-    <details className="config-section" open={defaultOpen}>
-      <summary className="config-summary">
-        <div>
-          <div className="eyebrow">{kicker}</div>
-          <h3 className="section-title">{title}</h3>
-          <p className="muted">{description}</p>
-        </div>
-        <span className="tag config-toggle" />
-      </summary>
-      <div className="section-body">{children}</div>
-    </details>
+    <Accordion defaultExpanded={defaultOpen} disableGutters elevation={0} variant="outlined" sx={{ borderLeft: 0, borderRight: 0, borderTop: 0, '&:last-child': { borderBottom: 0 } }}>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ py: 2 }}>
+        <Box>
+          <Typography variant="overline" color="secondary" sx={{ display: 'block' }}>{kicker}</Typography>
+          <Typography variant="h3">{title}</Typography>
+          <Typography variant="body2" color="text.secondary">{description}</Typography>
+        </Box>
+      </AccordionSummary>
+      <AccordionDetails sx={{ py: 3, borderTop: '1px solid', borderColor: 'divider', bgcolor: 'background.default' }}>
+        {children}
+      </AccordionDetails>
+    </Accordion>
   );
 }
 
@@ -173,14 +191,15 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
   const router = useRouter();
   const [scenario, setScenario] = useState<ScenarioInput>(initialScenario);
   const [isSaving, setIsSaving] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
   const [queuedRunId, setQueuedRunId] = useState<string | null>(null);
   const [runSeedManuallyEdited, setRunSeedManuallyEdited] = useState(false);
+  const [activeRunKind, setActiveRunKind] = useState<"seed" | "random" | "montecarlo" | null>(null);
   const [isRunPending, startRunTransition] = useTransition();
   const [runConfig, setRunConfig] = useState({
     horizonDays: 7,
     seed: initialScenario.seedDefault,
-    monteCarloIterations: 25,
-    runType: "seed" as "seed" | "montecarlo" | "random"
+    monteCarloIterations: 25
   });
 
   useEffect(() => {
@@ -189,9 +208,9 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
     }
   }, [runSeedManuallyEdited, scenario.seedDefault]);
 
-  const updateScenario = <K extends keyof ScenarioInput>(key: K, value: ScenarioInput[K]) => {
+  const updateScenario = useCallback(<K extends keyof ScenarioInput>(key: K, value: ScenarioInput[K]) => {
     setScenario((current) => ({ ...current, [key]: value }));
-  };
+  }, []);
 
   const openWindow = averageOpenWindow(scenario);
   const demandPeakHour = clamp(Math.round((openWindow.openHour + openWindow.closeHour) / 2), 0, 23);
@@ -205,7 +224,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
     Math.round(point.coverage * scenario.resourceConfig.radiologists)
   );
 
-  const updateOnShiftCount = (group: keyof ScenarioInput["staffRotation"], index: number, onShiftCount: number) => {
+  const updateOnShiftCount = useCallback((group: keyof ScenarioInput["staffRotation"], index: number, onShiftCount: number) => {
     const total =
       group === "technicians"
         ? scenario.resourceConfig.technicians
@@ -222,9 +241,9 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         itemIndex === index ? { ...item, coverage: safeCount / safeTotal } : item
       )
     });
-  };
+  }, [scenario.resourceConfig, scenario.staffRotation, updateScenario]);
 
-  const applyEightHourShiftPreset = () => {
+  const applyEightHourShiftPreset = useCallback(() => {
     const staffedHours = Math.max(openWindow.closeHour - openWindow.openHour, 8);
     const expectedTechniciansOnShift = Math.min(
       scenario.resourceConfig.technicians,
@@ -253,23 +272,24 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         scenario.resourceConfig.radiologists
       )
     });
-  };
+  }, [openWindow.closeHour, openWindow.openHour, scenario.resourceConfig.technicians, scenario.resourceConfig.supportStaff, scenario.resourceConfig.radiologists, updateScenario]);
 
-  const applyScenarioPreset = (preset: ScenarioInput) => {
+  const applyScenarioPreset = useCallback((preset: ScenarioInput) => {
     setScenario({ ...preset, id: scenario.id });
     setRunSeedManuallyEdited(false);
     setRunConfig((current) => ({ ...current, seed: preset.seedDefault }));
-  };
+  }, [scenario.id]);
 
-  const submitScenario = async (nextScenario = scenario) => {
+  const submitScenario = useCallback(async (nextScenario = scenario) => {
     setIsSaving(true);
+    setFlash(null);
     const formData = new FormData();
     formData.set("scenario", JSON.stringify(nextScenario));
 
     try {
       const result = await saveScenarioAction(formData);
       setScenario((current) => ({ ...current, id: result.id }));
-      toast.success("Scenario saved successfully.");
+      setFlash("Scenario saved.");
       if (mode === "create") {
         router.replace(viewMode === "advanced" ? `/scenarios/${result.id}/advanced` : `/scenarios/${result.id}`);
       } else {
@@ -278,59 +298,64 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
       return result.id;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save scenario.";
-      toast.error(message);
+      setFlash(message);
       return null;
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [mode, router, scenario, viewMode]);
 
-  const generateRandomSeed = () => {
+  const generateRandomSeed = useCallback(() => {
     if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
       const values = new Uint32Array(1);
       window.crypto.getRandomValues(values);
       return Math.max(1, values[0]);
     }
     return Math.max(1, Math.floor(Math.random() * 2147483647));
-  };
+  }, []);
 
-  const saveAndRun = async () => {
+  const saveAndRun = useCallback(async (seedToUse: number) => {
     const scenarioId = scenario.id ?? (await submitScenario());
     if (!scenarioId) {
       return;
     }
 
-    const seedToUse = runConfig.runType === "random" ? generateRandomSeed() : runConfig.seed;
+    const formData = new FormData();
+    formData.set("scenarioId", scenarioId);
+    formData.set("horizonDays", String(runConfig.horizonDays));
+    formData.set("seed", String(seedToUse));
+
+    startRunTransition(async () => {
+      const result = await runSimulationAction(formData);
+      setQueuedRunId(result.runId);
+      setFlash("Simulation started in the background.");
+      setActiveRunKind(null);
+      router.refresh();
+    });
+  }, [runConfig.horizonDays, scenario.id, submitScenario, router]);
+
+  const saveAndRunMonteCarlo = useCallback(async (seedToUse: number) => {
+    const scenarioId = scenario.id ?? (await submitScenario());
+    if (!scenarioId) {
+      return;
+    }
 
     const formData = new FormData();
     formData.set("scenarioId", scenarioId);
     formData.set("horizonDays", String(runConfig.horizonDays));
     formData.set("seed", String(seedToUse));
-    if (runConfig.runType === "montecarlo") {
-      formData.set("iterations", String(runConfig.monteCarloIterations));
-    }
+    formData.set("iterations", String(runConfig.monteCarloIterations));
 
     startRunTransition(async () => {
-      try {
-        const result = runConfig.runType === "montecarlo" 
-          ? await runMonteCarloAction(formData)
-          : await runSimulationAction(formData);
-          
-        setQueuedRunId(result.runId);
-        toast.success(runConfig.runType === "montecarlo" ? "Monte Carlo run started." : "Simulation started.", {
-          action: {
-            label: "View Run",
-            onClick: () => router.push(`/runs/${result.runId}`)
-          }
-        });
-        router.refresh();
-      } catch (error) {
-        toast.error("Failed to start simulation.");
-      }
+      const result = await runMonteCarloAction(formData);
+      setQueuedRunId(result.runId);
+      setFlash("Monte Carlo run started in the background.");
+      setActiveRunKind(null);
+      router.refresh();
     });
-  };
+  }, [runConfig.horizonDays, runConfig.monteCarloIterations, scenario.id, submitScenario, router]);
 
-  const goToAdvanced = async () => {
+  const goToAdvanced = useCallback(async () => {
     if (mode === "create") {
       const scenarioId = scenario.id ?? (await submitScenario());
       if (!scenarioId) {
@@ -340,39 +365,61 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
       return;
     }
     router.push(`/scenarios/${scenario.id}/advanced`);
-  };
+  }, [mode, router, scenario, submitScenario]);
 
-  const goToBasic = () => {
+  const goToBasic = useCallback(() => {
     if (mode === "create") {
       router.push("/scenarios/new");
       return;
     }
     router.push(`/scenarios/${scenario.id}`);
-  };
+  }, [mode, router, scenario.id]);
 
-  const basicSections = (
+  const basicSections = useMemo(() => (
     <>
       <section className="panel stack">
-        <div>
-          <div className="eyebrow">Quick Start</div>
-          <h2 className="section-title">Build a scenario without filling every field first</h2>
-          <p className="muted">Pick a preset, auto-fill staffing, and generate an expected demand curve. Demand and service mix are used as probabilistic weights, not fixed schedules.</p>
-        </div>
-        <div className="preset-grid">
+        <Box>
+          <Typography variant="overline" color="primary">Quick Start</Typography>
+          <Typography variant="h5" sx={{ mt: 1, mb: 1, fontWeight: 600 }}>Build a preliminary model before tuning everything</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Pick a preset, auto-fill staffing, and generate an expected demand curve. Demand and service mix are used as probabilistic weights, not fixed schedules.
+          </Typography>
+        </Box>
+        <Grid container spacing={2}>
           {SAMPLE_SCENARIOS.map((preset) => (
-            <button key={preset.name} type="button" className="preset-card" onClick={() => applyScenarioPreset(preset)}>
-              <strong>{preset.name}</strong>
-              <span>{preset.description}</span>
-            </button>
+            <Grid size={{ xs: 12, sm: 6, lg: 3 }} key={preset.name}>
+              <Button
+                variant="outlined"
+                color="secondary"
+                fullWidth
+                onClick={() => applyScenarioPreset(preset)}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  textAlign: "left",
+                  py: 1.5,
+                  px: 2,
+                  gap: 0.5,
+                  minHeight: 120,
+                  lineHeight: 1.4,
+                  borderColor: "divider",
+                  "&:hover": { borderColor: "primary.main", background: "rgba(37,99,235,0.04)" }
+                }}
+              >
+                <Typography variant="subtitle2" component="strong" sx={{ fontWeight: 600 }}>{preset.name}</Typography>
+                <Typography variant="caption" sx={{ color: "text.secondary", whiteSpace: "normal" }}>{preset.description}</Typography>
+              </Button>
+            </Grid>
           ))}
-        </div>
-        <div className="button-row">
-          <button type="button" className="secondary-button" onClick={applyEightHourShiftPreset}>
+        </Grid>
+        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+          <Button variant="outlined" color="secondary" onClick={applyEightHourShiftPreset}>
             Auto-fill 8h / 6d shifts
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
             onClick={() =>
               updateScenario("demandProfile", {
                 ...scenario.demandProfile,
@@ -386,10 +433,10 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
             }
           >
             Use expected demand curve
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
             onClick={() =>
               updateScenario("serviceMix", scenario.serviceMix.map((item, index, list) => ({
                 ...item,
@@ -398,8 +445,8 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
             }
           >
             Even service mix
-          </button>
-        </div>
+          </Button>
+        </Stack>
       </section>
 
       <SectionBlock
@@ -408,42 +455,67 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         description="Name the scenario, choose a seed, currency, downtime rate, and capture the planning context in plain language."
         defaultOpen
       >
-        <div className="field-grid">
-          <div className="field">
-            <label htmlFor="name">Scenario name</label>
-            <input id="name" value={scenario.name} onChange={(event) => updateScenario("name", event.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="currency">Currency</label>
-            <select id="currency" value={scenario.currency} onChange={(event) => updateScenario("currency", event.target.value)}>
-              {SUPPORTED_CURRENCIES.map((currency) => (
-                <option key={currency} value={currency}>
-                  {currency}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="seed">Default seed</label>
-            <input id="seed" type="number" value={scenario.seedDefault} onChange={(event) => updateScenario("seedDefault", Number(event.target.value))} />
-          </div>
-          <div className="field">
-            <label htmlFor="downtime">Equipment downtime rate</label>
-            <input
-              id="downtime"
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              label="Scenario name"
+              fullWidth
+              value={scenario.name}
+              onChange={(event) => updateScenario("name", event.target.value)}
+            />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <FormControl fullWidth>
+              <InputLabel>Currency</InputLabel>
+              <Select
+                value={scenario.currency}
+                label="Currency"
+                onChange={(event) => updateScenario("currency", event.target.value)}
+              >
+                {SUPPORTED_CURRENCIES.map((currency) => (
+                  <MenuItem key={currency} value={currency}>
+                    {currency}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              label="Default seed"
+              fullWidth
               type="number"
-              min="0"
-              max="1"
-              step="0.01"
+              value={scenario.seedDefault}
+              onChange={(event) => updateScenario("seedDefault", Number(event.target.value))}
+            />
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              label="Equipment downtime rate"
+              fullWidth
+              type="number"
+              slotProps={{
+                htmlInput: {
+                  min: 0,
+                  max: 1,
+                  step: 0.01
+                }
+              }}
               value={scenario.downtimeRate}
               onChange={(event) => updateScenario("downtimeRate", Number(event.target.value))}
             />
-          </div>
-        </div>
-        <div className="field">
-          <label htmlFor="description">Description</label>
-          <textarea id="description" value={scenario.description} onChange={(event) => updateScenario("description", event.target.value)} />
-        </div>
+          </Grid>
+          <Grid size={{ xs: 12 }}>
+            <TextField
+              label="Description"
+              fullWidth
+              multiline
+              rows={3}
+              value={scenario.description}
+              onChange={(event) => updateScenario("description", event.target.value)}
+            />
+          </Grid>
+        </Grid>
       </SectionBlock>
 
       <SectionBlock
@@ -452,10 +524,12 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         description="Configure machine counts and physical spaces. Portable X-Ray machines act as flexible X-Ray capacity for immobile patients."
         defaultOpen
       >
-        <div className="flash" style={{ background: "rgba(53, 108, 92, 0.08)", color: "var(--ink)" }}>
-          Portable X-Ray is a special X-Ray path for immobile patients, but standard X-Ray requests can still spill over to portable machines when needed.
-        </div>
-        <div className="field-grid">
+        <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'rgba(37,99,235,0.04)', color: 'text.secondary', mb: 3 }}>
+          <Typography variant="body2">
+            Portable X-Ray is a special X-Ray path for immobile patients, but standard X-Ray requests can still spill over to portable machines when needed.
+          </Typography>
+        </Paper>
+        <Grid container spacing={3}>
           {[
             ["xRayMachines", "X-Ray machines"],
             ["ctMachines", "CT scanners"],
@@ -465,11 +539,12 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
             ["rooms", "Procedure rooms"],
             ["changingRooms", "Changing rooms"]
           ].map(([key, label]) => (
-            <div className="field" key={key}>
-              <label>{label}</label>
-              <input
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key}>
+              <TextField
+                label={label}
+                fullWidth
                 type="number"
-                min="0"
+                slotProps={{ htmlInput: { min: 0 } }}
                 value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
                 onChange={(event) => {
                   const nextValue = Number(event.target.value);
@@ -493,9 +568,9 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                   }
                 }}
               />
-            </div>
+            </Grid>
           ))}
-        </div>
+        </Grid>
       </SectionBlock>
 
       <SectionBlock
@@ -504,17 +579,18 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         description="Set total team size first. Hourly on-shift staffing is configured in Advanced Options."
         defaultOpen
       >
-        <div className="field-grid">
+        <Grid container spacing={3}>
           {[
             ["technicians", "Technicians"],
             ["supportStaff", "Support staff"],
             ["radiologists", "Radiologists"]
           ].map(([key, label]) => (
-            <div className="field" key={key}>
-              <label>{label}</label>
-              <input
+            <Grid size={{ xs: 12, sm: 4 }} key={key}>
+              <TextField
+                label={label}
+                fullWidth
                 type="number"
-                min="0"
+                slotProps={{ htmlInput: { min: 0 } }}
                 value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
                 onChange={(event) =>
                   updateScenario("resourceConfig", {
@@ -523,27 +599,15 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                   })
                 }
               />
-            </div>
+            </Grid>
           ))}
-        </div>
+        </Grid>
       </SectionBlock>
     </>
-  );
+  ), [scenario, openWindow, demandPeakHour, applyEightHourShiftPreset, applyScenarioPreset, updateScenario]);
 
-  const advancedSections = (
+  const advancedSections = useMemo(() => (
     <>
-      <section className="panel stack">
-        <div>
-          <div className="eyebrow">Advanced Options</div>
-          <h2 className="section-title">Tune the detailed operating model</h2>
-          <p className="muted">This page is for department-level assumptions like operating hours, staffing by hour, demand curves, service mix, and average modality timings. The simulator samples patient-level duration variability around those averages.</p>
-        </div>
-        <div className="button-row">
-          <button type="button" className="secondary-button" onClick={goToBasic}>
-            Back to Basic Options
-          </button>
-        </div>
-      </section>
 
       <SectionBlock
         kicker="Section 4"
@@ -551,12 +615,14 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         description="Department-level availability for rooms, machines, and scheduled staff."
         defaultOpen
       >
-        <div className="stack">
-          <p className="muted">If a day is closed, no scans or prep happen that day. Open and close hours define when the department can actually process work.</p>
-          <div className="button-row">
-            <button
-              type="button"
-              className="secondary-button"
+        <Stack spacing={3}>
+          <Typography variant="body2" color="text.secondary">
+            If a day is closed, no scans or prep happen that day. Open and close hours define when the department can actually process work.
+          </Typography>
+          <Stack direction="row" spacing={2}>
+            <Button
+              variant="outlined"
+              color="secondary"
               onClick={() =>
                 updateScenario(
                   "operatingHours",
@@ -567,10 +633,10 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
               }
             >
               Apply weekday 7-18
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
+            </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
               onClick={() =>
                 updateScenario(
                   "operatingHours",
@@ -579,31 +645,35 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
               }
             >
               Open all week
-            </button>
-          </div>
-          <div className="hours-grid">
+            </Button>
+          </Stack>
+          <Stack spacing={2}>
             {scenario.operatingHours.map((entry, index) => (
-              <div className="field-grid compact-grid hours-row" key={DAY_NAMES[index]}>
-                <div className="field">
-                  <label>{DAY_NAMES[index]}</label>
-                  <select
-                    value={String(entry.enabled)}
-                    onChange={(event) =>
-                      updateScenario("operatingHours", scenario.operatingHours.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, enabled: event.target.value === "true" } : item
-                      ))
-                    }
-                  >
-                    <option value="true">Open</option>
-                    <option value="false">Closed</option>
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Open hour</label>
-                  <input
+              <Grid container spacing={2} key={DAY_NAMES[index]} alignItems="center">
+                <Grid size={{ xs: 12, sm: 4 }}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>{DAY_NAMES[index]}</InputLabel>
+                    <Select
+                      value={String(entry.enabled)}
+                      label={DAY_NAMES[index]}
+                      onChange={(event) =>
+                        updateScenario("operatingHours", scenario.operatingHours.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, enabled: event.target.value === "true" } : item
+                        ))
+                      }
+                    >
+                      <MenuItem value="true">Open</MenuItem>
+                      <MenuItem value="false">Closed</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4 }}>
+                  <TextField
+                    label="Open hour"
+                    fullWidth
+                    size="small"
                     type="number"
-                    min="0"
-                    max="23"
+                    slotProps={{ htmlInput: { min: 0, max: 23 } }}
                     value={entry.openHour}
                     onChange={(event) =>
                       updateScenario("operatingHours", scenario.operatingHours.map((item, itemIndex) =>
@@ -611,13 +681,14 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                       ))
                     }
                   />
-                </div>
-                <div className="field">
-                  <label>Close hour</label>
-                  <input
+                </Grid>
+                <Grid size={{ xs: 6, sm: 4 }}>
+                  <TextField
+                    label="Close hour"
+                    fullWidth
+                    size="small"
                     type="number"
-                    min="1"
-                    max="24"
+                    slotProps={{ htmlInput: { min: 1, max: 24 } }}
                     value={entry.closeHour}
                     onChange={(event) =>
                       updateScenario("operatingHours", scenario.operatingHours.map((item, itemIndex) =>
@@ -625,11 +696,11 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                       ))
                     }
                   />
-                </div>
-              </div>
+                </Grid>
+              </Grid>
             ))}
-          </div>
-        </div>
+          </Stack>
+        </Stack>
       </SectionBlock>
 
       <SectionBlock
@@ -638,18 +709,22 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         description="Plan how many people are on shift by hour, or auto-fill from a simple staffing heuristic."
         defaultOpen
       >
-        <div className="stack">
-          <div className="flash" style={{ background: "rgba(181, 93, 56, 0.08)", color: "var(--ink)" }}>
-            Auto-fill uses a simple planning rule: 8-hour shifts and 6 working days per week for each team member, spread across the open day.
-          </div>
-          <p className="muted">Radiologists are allowed to report outside scan operating hours if you staff them in those hours, which lets the model represent evening or overnight reporting backlogs being cleared.</p>
-          <div className="button-row">
-            <button type="button" className="secondary-button" onClick={applyEightHourShiftPreset}>
+        <Stack spacing={3}>
+          <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'rgba(181, 93, 56, 0.08)', color: 'text.secondary' }}>
+            <Typography variant="body2">
+              Auto-fill uses a simple planning rule: 8-hour shifts and 6 working days per week for each team member, spread across the open day.
+            </Typography>
+          </Paper>
+          <Typography variant="body2" color="text.secondary">
+            Radiologists are allowed to report outside scan operating hours if you staff them in those hours, which lets the model represent evening or overnight reporting backlogs being cleared.
+          </Typography>
+          <Stack direction="row" spacing={2}>
+            <Button variant="outlined" color="secondary" onClick={applyEightHourShiftPreset}>
               Auto-fill 8h / 6d shifts
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
+            </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
               onClick={() =>
                 updateScenario("staffRotation", {
                   technicians: scenario.staffRotation.technicians.map((point) => ({
@@ -683,13 +758,15 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
               }
             >
               Match operating hours
-            </button>
-          </div>
-          <p className="muted">Total team size stays in Basic Options. Here you only set how many are actually present each hour.</p>
+            </Button>
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            Total team size stays in Basic Options. Here you only set how many are actually present each hour.
+          </Typography>
           {(["technicians", "supportStaff", "radiologists"] as const).map((group) => (
-            <div key={group} className="stack rotation-group">
-              <div className="eyebrow">{group}</div>
-              <div className="shift-summary">
+            <Stack key={group} spacing={2} sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="overline" color="primary">{group}</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                 {(group === "technicians"
                   ? technicianSchedulePreview
                   : group === "supportStaff"
@@ -699,22 +776,22 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                   .map((count, index) => `${index}:00 ${count}`)
                   .slice(openWindow.openHour, Math.min(openWindow.closeHour + 2, 24))
                   .join(" • ")}
-              </div>
-              <div className="staff-grid">
+              </Typography>
+              <Grid container spacing={2}>
                 {scenario.staffRotation[group].map((point, index) => (
-                  <div className="field" key={`${group}-${point.hour}`}>
-                    <label>{point.hour}:00</label>
-                    <input
+                  <Grid size={{ xs: 6, sm: 3, md: 2 }} key={`${group}-${point.hour}`}>
+                    <TextField
+                      label={`${point.hour}:00`}
+                      fullWidth
+                      size="small"
                       type="number"
-                      min="0"
-                      step="1"
-                      max={
-                        group === "technicians"
-                          ? scenario.resourceConfig.technicians
-                          : group === "supportStaff"
-                            ? scenario.resourceConfig.supportStaff
-                            : scenario.resourceConfig.radiologists
-                      }
+                      slotProps={{ 
+                        htmlInput: { 
+                          min: 0, 
+                          step: 1, 
+                          max: group === "technicians" ? scenario.resourceConfig.technicians : group === "supportStaff" ? scenario.resourceConfig.supportStaff : scenario.resourceConfig.radiologists 
+                        } 
+                      }}
                       value={
                         group === "technicians"
                           ? technicianSchedulePreview[index]
@@ -723,309 +800,178 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                             : radiologistSchedulePreview[index]
                       }
                       onChange={(event) => updateOnShiftCount(group, index, Number(event.target.value))}
+                      helperText={`Coverage: ${(group === "technicians" ? scenario.staffRotation.technicians[index].coverage : group === "supportStaff" ? scenario.staffRotation.supportStaff[index].coverage : scenario.staffRotation.radiologists[index].coverage).toFixed(2)}`}
                     />
-                    <div className="helper-copy">
-                      Team coverage:{" "}
-                      {group === "technicians"
-                        ? scenario.staffRotation.technicians[index].coverage.toFixed(2)
-                        : group === "supportStaff"
-                          ? scenario.staffRotation.supportStaff[index].coverage.toFixed(2)
-                          : scenario.staffRotation.radiologists[index].coverage.toFixed(2)}
-                    </div>
-                  </div>
+                  </Grid>
                 ))}
-              </div>
-            </div>
+              </Grid>
+            </Stack>
           ))}
-        </div>
+        </Stack>
       </SectionBlock>
 
       <SectionBlock
         kicker="Section 6"
-        title="Demand Profile + Day of Week Demand"
+        title="Demand Profile"
         description="Define weighted arrival patterns and weekly demand shifts. The simulator still samples patients probabilistically around those weights."
       >
-        <div className="grid-2">
-          <div className="stack">
-            <div className="field-grid">
-              <div className="field">
-                <label>Base daily patients</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={scenario.demandProfile.baseDailyPatients}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      baseDailyPatients: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Inpatient fraction</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={scenario.demandProfile.inpatientFraction}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      inpatientFraction: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Female patient fraction</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={scenario.demandProfile.femaleFraction}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      femaleFraction: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Urgent fraction</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={scenario.demandProfile.urgentFraction}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      urgentFraction: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>No-show rate</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={scenario.demandProfile.noShowRate}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      noShowRate: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Unexpected leave rate</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={scenario.demandProfile.unexpectedLeaveRate}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      unexpectedLeaveRate: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Repeat scan rate</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  value={scenario.demandProfile.repeatScanRate}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      repeatScanRate: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-              <div className="field">
-                <label>Result communication minutes</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={scenario.demandProfile.resultCommunicationMinutes}
-                  onChange={(event) =>
-                    updateScenario("demandProfile", {
-                      ...scenario.demandProfile,
-                      resultCommunicationMinutes: Number(event.target.value)
-                    })
-                  }
-                />
-              </div>
-            </div>
-            <div className="button-row">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() =>
-                  updateScenario("demandProfile", {
-                    ...scenario.demandProfile,
-                    hourlyDistribution: buildExpectedHourlyDistribution(
-                      openWindow.openHour,
-                      openWindow.closeHour,
-                      demandPeakHour,
-                      Math.max(2, Math.round((openWindow.closeHour - openWindow.openHour) / 4))
-                    )
-                  })
-                }
-              >
-                Expected bell curve
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() =>
-                  updateScenario("demandProfile", {
-                    ...scenario.demandProfile,
-                    hourlyDistribution: normalize(scenario.demandProfile.hourlyDistribution)
-                  })
-                }
-              >
-                Normalize hourly distribution
-              </button>
-            </div>
-            <HourlyDemandChart
-              values={scenario.demandProfile.hourlyDistribution}
-              onChange={(hourlyDistribution) =>
-                updateScenario("demandProfile", {
-                  ...scenario.demandProfile,
-                  hourlyDistribution
-                })
-              }
-            />
-            <div className="field-grid micro-grid">
-              {scenario.demandProfile.hourlyDistribution.map((value, index) => (
-                <div className="field" key={`hour-${index}`}>
-                  <label>{index}:00</label>
-                  <div className="demand-input-stack">
-                    <input
-                      type="range"
-                      min="0"
-                      max="0.2"
-                      step="0.005"
-                      value={value}
-                      onChange={(event) =>
-                        updateScenario("demandProfile", {
-                          ...scenario.demandProfile,
-                          hourlyDistribution: scenario.demandProfile.hourlyDistribution.map((item, itemIndex) =>
-                            itemIndex === index ? Number(event.target.value) : item
-                          )
-                        })
-                      }
-                    />
-                    <input
+        <Grid container spacing={4}>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Stack spacing={3}>
+              <Grid container spacing={2}>
+                {[
+                  ["baseDailyPatients", "Base daily patients", 1, undefined, 1],
+                  ["inpatientFraction", "Inpatient fraction", 0, 1, 0.01],
+                  ["femaleFraction", "Female patient fraction", 0, 1, 0.01],
+                  ["urgentFraction", "Urgent fraction", 0, 1, 0.01],
+                  ["noShowRate", "No-show rate", 0, 1, 0.01],
+                  ["unexpectedLeaveRate", "Unexpected leave rate", 0, 1, 0.01],
+                  ["repeatScanRate", "Repeat scan rate", 0, 1, 0.01],
+                  ["resultCommunicationMinutes", "Result communication minutes", 0, undefined, 1]
+                ].map(([key, label, min, max, step]) => (
+                  <Grid size={{ xs: 6 }} key={key as string}>
+                    <TextField
+                      label={label as string}
+                      fullWidth
+                      size="small"
                       type="number"
-                      min="0"
-                      step="0.01"
-                      value={value}
+                      slotProps={{ htmlInput: { min, max, step } }}
+                      value={scenario.demandProfile[key as keyof typeof scenario.demandProfile]}
                       onChange={(event) =>
                         updateScenario("demandProfile", {
                           ...scenario.demandProfile,
-                          hourlyDistribution: scenario.demandProfile.hourlyDistribution.map((item, itemIndex) =>
+                          [key as string]: Number(event.target.value)
+                        })
+                      }
+                    />
+                  </Grid>
+                ))}
+              </Grid>
+              <Stack direction="row" spacing={2}>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="small"
+                  onClick={() =>
+                    updateScenario("demandProfile", {
+                      ...scenario.demandProfile,
+                      hourlyDistribution: buildExpectedHourlyDistribution(
+                        openWindow.openHour,
+                        openWindow.closeHour,
+                        demandPeakHour,
+                        Math.max(2, Math.round((openWindow.closeHour - openWindow.openHour) / 4))
+                      )
+                    })
+                  }
+                >
+                  Expected bell curve
+                </Button>
+                <Button
+                  variant="outlined"
+                  color="secondary"
+                  size="small"
+                  onClick={() =>
+                    updateScenario("demandProfile", {
+                      ...scenario.demandProfile,
+                      hourlyDistribution: normalize(scenario.demandProfile.hourlyDistribution)
+                    })
+                  }
+                >
+                  Normalize distribution
+                </Button>
+              </Stack>
+              <Paper elevation={0} variant="outlined" sx={{ p: 2 }}>
+                <HourlyDemandChart
+                  values={scenario.demandProfile.hourlyDistribution}
+                  onChange={(hourlyDistribution) =>
+                    updateScenario("demandProfile", {
+                      ...scenario.demandProfile,
+                      hourlyDistribution
+                    })
+                  }
+                />
+              </Paper>
+            </Stack>
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <Stack spacing={2}>
+              <Typography variant="subtitle2">Day-of-Week Demand</Typography>
+              <Grid container spacing={2}>
+                {DAY_NAMES.map((day, index) => (
+                  <Grid size={{ xs: 6, sm: 4 }} key={day}>
+                    <TextField
+                      label={day}
+                      fullWidth
+                      size="small"
+                      type="number"
+                      slotProps={{ htmlInput: { min: 0, step: 0.05 } }}
+                      value={scenario.demandProfile.dayOfWeekMultiplier[index]}
+                      onChange={(event) =>
+                        updateScenario("demandProfile", {
+                          ...scenario.demandProfile,
+                          dayOfWeekMultiplier: scenario.demandProfile.dayOfWeekMultiplier.map((item, itemIndex) =>
                             itemIndex === index ? Number(event.target.value) : item
                           )
                         })
                       }
                     />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="stack">
-            <h3 className="section-title">Day-of-Week Demand</h3>
-            <div className="field-grid">
-              {DAY_NAMES.map((day, index) => (
-                <div className="field" key={day}>
-                  <label>{day}</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.05"
-                    value={scenario.demandProfile.dayOfWeekMultiplier[index]}
-                    onChange={(event) =>
-                      updateScenario("demandProfile", {
-                        ...scenario.demandProfile,
-                        dayOfWeekMultiplier: scenario.demandProfile.dayOfWeekMultiplier.map((item, itemIndex) =>
-                          itemIndex === index ? Number(event.target.value) : item
-                        )
-                      })
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+                  </Grid>
+                ))}
+              </Grid>
+            </Stack>
+          </Grid>
+        </Grid>
       </SectionBlock>
 
-          <SectionBlock
+      <SectionBlock
         kicker="Section 7"
         title="Service Mix"
         description="Control weighted modality demand. Each arriving patient is assigned a service probabilistically from these weights."
       >
-        <div className="button-row">
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() =>
-              updateScenario("serviceMix", scenario.serviceMix.map((item, index, list) => ({
-                ...item,
-                weight: Number((1 / list.length).toFixed(4))
-              })))
-            }
-          >
-            Even split
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            onClick={() => updateScenario("serviceMix", normalize(scenario.serviceMix.map((item) => item.weight)).map((weight, index) => ({
-              ...scenario.serviceMix[index],
-              weight
-            })))}
-          >
-            Normalize mix
-          </button>
-        </div>
-        <div className="field-grid">
-          {scenario.serviceMix.map((item, index) => (
-            <div className="field" key={item.modality}>
-              <label>{item.modality === "PORTABLE_XRAY" ? "Portable X-Ray requests" : MODALITY_LABELS[item.modality]}</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={item.weight}
-                onChange={(event) =>
-                  updateScenario("serviceMix", scenario.serviceMix.map((mix, mixIndex) =>
-                    mixIndex === index ? { ...mix, weight: Number(event.target.value) } : mix
-                  ))
-                }
-              />
-            </div>
-          ))}
-        </div>
+        <Stack spacing={3}>
+          <Stack direction="row" spacing={2}>
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() =>
+                updateScenario("serviceMix", scenario.serviceMix.map((item, index, list) => ({
+                  ...item,
+                  weight: Number((1 / list.length).toFixed(4))
+                })))
+              }
+            >
+              Even split
+            </Button>
+            <Button
+              variant="outlined"
+              color="secondary"
+              onClick={() => updateScenario("serviceMix", normalize(scenario.serviceMix.map((item) => item.weight)).map((weight, index) => ({
+                ...scenario.serviceMix[index],
+                weight
+              })))}
+            >
+              Normalize mix
+            </Button>
+          </Stack>
+          <Grid container spacing={2}>
+            {scenario.serviceMix.map((item, index) => (
+              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={item.modality}>
+                <TextField
+                  label={item.modality === "PORTABLE_XRAY" ? "Portable X-Ray requests" : MODALITY_LABELS[item.modality]}
+                  fullWidth
+                  type="number"
+                  slotProps={{ htmlInput: { min: 0, step: 0.01 } }}
+                  value={item.weight}
+                  onChange={(event) =>
+                    updateScenario("serviceMix", scenario.serviceMix.map((mix, mixIndex) =>
+                      mixIndex === index ? { ...mix, weight: Number(event.target.value) } : mix
+                    ))
+                  }
+                />
+              </Grid>
+            ))}
+          </Grid>
+        </Stack>
       </SectionBlock>
 
       <SectionBlock
@@ -1033,18 +979,22 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         title="Service Configuration"
         description="Tune prep, exam, cleanup, and report times. Defaults are meant to feel like industry-style operational baselines."
       >
-        <div className="flash" style={{ background: "rgba(53, 108, 92, 0.08)", color: "var(--ink)" }}>
-          Workflow in this version: support staff greet and route the patient, only CT requires a changing room, technicians perform one scan at a time, and radiologist report time is configurable per modality. Prep, cleanup, reporting, and exam times are treated as averages, and the engine samples patient-level variation around them during each run.
-        </div>
-        <div className="service-config-grid">
+        <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'rgba(37,99,235,0.04)', color: 'text.secondary', mb: 3 }}>
+          <Typography variant="body2">
+            Workflow in this version: support staff greet and route the patient, only CT requires a changing room, technicians perform one scan at a time, and radiologist report time is configurable per modality. Prep, cleanup, reporting, and exam times are treated as averages, and the engine samples patient-level variation around them during each run.
+          </Typography>
+        </Paper>
+        <Grid container spacing={3}>
           {scenario.serviceConfigs.map((service, index) => (
-            <div className="scenario-card stack" key={service.modality}>
-              <strong>{MODALITY_LABELS[service.modality]}</strong>
-              <div className="field">
-                <label>Charge</label>
-                <input
+            <Grid size={{ xs: 12, md: 6, lg: 4 }} key={service.modality}>
+              <Paper variant="outlined" sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{MODALITY_LABELS[service.modality]}</Typography>
+                <TextField
+                  label="Charge"
+                  fullWidth
+                  size="small"
                   type="number"
-                  min="0"
+                  slotProps={{ htmlInput: { min: 0 } }}
                   value={service.charge}
                   onChange={(event) =>
                     updateScenario("serviceConfigs", scenario.serviceConfigs.map((item, itemIndex) =>
@@ -1052,12 +1002,12 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                     ))
                   }
                 />
-              </div>
-              <div className="field">
-                <label>Exam duration minutes</label>
-                <input
+                <TextField
+                  label="Exam duration minutes"
+                  fullWidth
+                  size="small"
                   type="number"
-                  min="5"
+                  slotProps={{ htmlInput: { min: 5 } }}
                   value={service.examDurationMinutes}
                   onChange={(event) =>
                     updateScenario("serviceConfigs", scenario.serviceConfigs.map((item, itemIndex) =>
@@ -1065,26 +1015,26 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                     ))
                   }
                 />
-              </div>
-              <div className="field">
-                <label>Prep minutes</label>
-                <input
+                <TextField
+                  label="Prep minutes"
+                  fullWidth
+                  size="small"
                   type="number"
-                  min="0"
+                  slotProps={{ htmlInput: { min: 0 } }}
                   value={service.prepDurationMinutes}
                   onChange={(event) =>
                     updateScenario("serviceConfigs", scenario.serviceConfigs.map((item, itemIndex) =>
                       itemIndex === index ? { ...item, prepDurationMinutes: Number(event.target.value) } : item
                     ))
                   }
+                  helperText={service.modality === "CT" ? "Uses support staff plus changing room." : "Uses support staff only."}
                 />
-                <div className="helper-copy">{service.modality === "CT" ? "Uses support staff plus changing room." : "Uses support staff only."}</div>
-              </div>
-              <div className="field">
-                <label>Cleanup minutes</label>
-                <input
+                <TextField
+                  label="Cleanup minutes"
+                  fullWidth
+                  size="small"
                   type="number"
-                  min="0"
+                  slotProps={{ htmlInput: { min: 0 } }}
                   value={service.cleanupMinutes}
                   onChange={(event) =>
                     updateScenario("serviceConfigs", scenario.serviceConfigs.map((item, itemIndex) =>
@@ -1092,24 +1042,24 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                     ))
                   }
                 />
-              </div>
-              <div className="field">
-                <label>Reporting minutes</label>
-                <input
+                <TextField
+                  label="Reporting minutes"
+                  fullWidth
+                  size="small"
                   type="number"
-                  min="1"
+                  slotProps={{ htmlInput: { min: 1 } }}
                   value={service.reportingMinutes}
                   onChange={(event) =>
                     updateScenario("serviceConfigs", scenario.serviceConfigs.map((item, itemIndex) =>
                       itemIndex === index ? { ...item, reportingMinutes: Number(event.target.value) } : item
                     ))
                   }
+                  helperText="Time radiologists spend producing the report for this modality."
                 />
-                <div className="helper-copy">Time radiologists spend producing the report for this modality.</div>
-              </div>
-            </div>
+              </Paper>
+            </Grid>
           ))}
-        </div>
+        </Grid>
       </SectionBlock>
 
       <SectionBlock
@@ -1117,17 +1067,22 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         title="Workflow Routing"
         description="Define which rooms can host each modality, which modalities require changing rooms, and how changing rooms are gender-assigned."
       >
-        <div className="stack">
-          <div className="flash" style={{ background: "rgba(53, 108, 92, 0.08)", color: "var(--ink)" }}>
-            Portable X-Ray is modeled as a bedside/mobile workflow by default and does not consume a procedure room. All other modalities must route through a compatible room definition below.
-          </div>
-          <div className="service-config-grid">
+        <Stack spacing={4}>
+          <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'rgba(37,99,235,0.04)', color: 'text.secondary' }}>
+            <Typography variant="body2">
+              Portable X-Ray is modeled as a bedside/mobile workflow by default and does not consume a procedure room. All other modalities must route through a compatible room definition below.
+            </Typography>
+          </Paper>
+          
+          <Grid container spacing={3}>
             {scenario.workflowConfig.roomConfigs.map((room, index) => (
-              <div className="scenario-card stack" key={room.id}>
-                <strong>{room.name}</strong>
-                <div className="field">
-                  <label>Room name</label>
-                  <input
+              <Grid size={{ xs: 12, md: 6 }} key={room.id}>
+                <Paper variant="outlined" sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{room.name}</Typography>
+                  <TextField
+                    label="Room name"
+                    fullWidth
+                    size="small"
                     value={room.name}
                     onChange={(event) =>
                       updateScenario("workflowConfig", {
@@ -1138,132 +1093,140 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                       })
                     }
                   />
-                </div>
-                <div className="field">
-                  <label>Dedicated modality</label>
-                  <select
-                    value={room.dedicatedModality}
-                    onChange={(event) =>
-                      updateScenario("workflowConfig", {
-                        ...scenario.workflowConfig,
-                        roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, dedicatedModality: event.target.value as typeof item.dedicatedModality } : item
-                        )
-                      })
-                    }
-                  >
-                    <option value="NONE">Flexible</option>
-                    {Object.entries(MODALITY_LABELS)
-                      .filter(([modality]) => modality !== "PORTABLE_XRAY")
-                      .map(([modality, label]) => (
-                        <option key={modality} value={modality}>
-                          {label}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div className="field">
-                  <label>Compatible modalities</label>
-                  <div className="button-row">
-                    {Object.entries(MODALITY_LABELS)
-                      .filter(([modality]) => modality !== "PORTABLE_XRAY")
-                      .map(([modality, label]) => {
-                        const typedModality = modality as ScenarioInput["serviceMix"][number]["modality"];
-                        const enabled = room.supportedModalities.includes(typedModality);
-                        return (
-                          <button
-                            key={`${room.id}-${modality}`}
-                            type="button"
-                            className="secondary-button"
-                            onClick={() =>
-                              updateScenario("workflowConfig", {
-                                ...scenario.workflowConfig,
-                                roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
-                                  itemIndex === index
-                                    ? {
-                                        ...item,
-                                        supportedModalities: enabled
-                                          ? item.supportedModalities.filter((value) => value !== modality)
-                                          : [...item.supportedModalities, typedModality]
-                                      }
-                                    : item
-                                )
-                              })
-                            }
-                          >
-                            {enabled ? `On: ${label}` : `Off: ${label}`}
-                          </button>
-                        );
-                      })}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="service-config-grid">
-            {scenario.workflowConfig.changingRoomConfigs.map((room, index) => (
-              <div className="scenario-card stack" key={room.id}>
-                <strong>{room.name}</strong>
-                <div className="field">
-                  <label>Changing room name</label>
-                  <input
-                    value={room.name}
-                    onChange={(event) =>
-                      updateScenario("workflowConfig", {
-                        ...scenario.workflowConfig,
-                        changingRoomConfigs: scenario.workflowConfig.changingRoomConfigs.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, name: event.target.value } : item
-                        )
-                      })
-                    }
-                  />
-                </div>
-                <div className="field">
-                  <label>Assigned gender</label>
-                  <select
-                    value={room.gender}
-                    onChange={(event) =>
-                      updateScenario("workflowConfig", {
-                        ...scenario.workflowConfig,
-                        changingRoomConfigs: scenario.workflowConfig.changingRoomConfigs.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, gender: event.target.value as typeof item.gender } : item
-                        )
-                      })
-                    }
-                  >
-                    <option value="FEMALE">Female</option>
-                    <option value="MALE">Male</option>
-                    <option value="UNISEX">Unisex</option>
-                  </select>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="field-grid">
-            {Object.entries(MODALITY_LABELS).map(([modality, label]) => (
-              <div className="field" key={`changing-rule-${modality}`}>
-                <label>{label} requires changing room</label>
-                <select
-                  value={String(scenario.workflowConfig.changingRoomByModality[modality as ScenarioInput["serviceMix"][number]["modality"]])}
-                  onChange={(event) =>
-                    updateScenario("workflowConfig", {
-                      ...scenario.workflowConfig,
-                      changingRoomByModality: {
-                        ...scenario.workflowConfig.changingRoomByModality,
-                        [modality]: event.target.value === "true"
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Dedicated modality</InputLabel>
+                    <Select
+                      value={room.dedicatedModality}
+                      label="Dedicated modality"
+                      onChange={(event) =>
+                        updateScenario("workflowConfig", {
+                          ...scenario.workflowConfig,
+                          roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, dedicatedModality: event.target.value as typeof item.dedicatedModality } : item
+                          )
+                        })
                       }
-                    })
-                  }
-                >
-                  <option value="false">No</option>
-                  <option value="true">Yes</option>
-                </select>
-              </div>
+                    >
+                      <MenuItem value="NONE">Flexible</MenuItem>
+                      {Object.entries(MODALITY_LABELS)
+                        .filter(([modality]) => modality !== "PORTABLE_XRAY")
+                        .map(([modality, label]) => (
+                          <MenuItem key={modality} value={modality}>
+                            {label}
+                          </MenuItem>
+                        ))}
+                    </Select>
+                  </FormControl>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>Compatible modalities</Typography>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      {Object.entries(MODALITY_LABELS)
+                        .filter(([modality]) => modality !== "PORTABLE_XRAY")
+                        .map(([modality, label]) => {
+                          const typedModality = modality as ScenarioInput["serviceMix"][number]["modality"];
+                          const enabled = room.supportedModalities.includes(typedModality);
+                          return (
+                            <Button
+                              key={`${room.id}-${modality}`}
+                              variant={enabled ? "contained" : "outlined"}
+                              color={enabled ? "primary" : "secondary"}
+                              size="small"
+                              onClick={() =>
+                                updateScenario("workflowConfig", {
+                                  ...scenario.workflowConfig,
+                                  roomConfigs: scenario.workflowConfig.roomConfigs.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          supportedModalities: enabled
+                                            ? item.supportedModalities.filter((value) => value !== modality)
+                                            : [...item.supportedModalities, typedModality]
+                                        }
+                                      : item
+                                  )
+                                })
+                              }
+                            >
+                              {enabled ? `✓ ${label}` : label}
+                            </Button>
+                          );
+                        })}
+                    </Stack>
+                  </Box>
+                </Paper>
+              </Grid>
             ))}
-          </div>
-        </div>
+          </Grid>
+
+          <Grid container spacing={3}>
+            {scenario.workflowConfig.changingRoomConfigs.map((room, index) => (
+              <Grid size={{ xs: 12, md: 4 }} key={room.id}>
+                <Paper variant="outlined" sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{room.name}</Typography>
+                  <TextField
+                    label="Changing room name"
+                    fullWidth
+                    size="small"
+                    value={room.name}
+                    onChange={(event) =>
+                      updateScenario("workflowConfig", {
+                        ...scenario.workflowConfig,
+                        changingRoomConfigs: scenario.workflowConfig.changingRoomConfigs.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, name: event.target.value } : item
+                        )
+                      })
+                    }
+                  />
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Assigned gender</InputLabel>
+                    <Select
+                      value={room.gender}
+                      label="Assigned gender"
+                      onChange={(event) =>
+                        updateScenario("workflowConfig", {
+                          ...scenario.workflowConfig,
+                          changingRoomConfigs: scenario.workflowConfig.changingRoomConfigs.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, gender: event.target.value as typeof item.gender } : item
+                          )
+                        })
+                      }
+                    >
+                      <MenuItem value="FEMALE">Female</MenuItem>
+                      <MenuItem value="MALE">Male</MenuItem>
+                      <MenuItem value="UNISEX">Unisex</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Paper>
+              </Grid>
+            ))}
+          </Grid>
+
+          <Grid container spacing={2}>
+            {Object.entries(MODALITY_LABELS).map(([modality, label]) => (
+              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={`changing-rule-${modality}`}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>{label} requires changing room</InputLabel>
+                  <Select
+                    value={String(scenario.workflowConfig.changingRoomByModality[modality as ScenarioInput["serviceMix"][number]["modality"]])}
+                    label={`${label} requires changing room`}
+                    onChange={(event) =>
+                      updateScenario("workflowConfig", {
+                        ...scenario.workflowConfig,
+                        changingRoomByModality: {
+                          ...scenario.workflowConfig.changingRoomByModality,
+                          [modality]: event.target.value === "true"
+                        }
+                      })
+                    }
+                  >
+                    <MenuItem value="false">No</MenuItem>
+                    <MenuItem value="true">Yes</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+            ))}
+          </Grid>
+        </Stack>
       </SectionBlock>
 
       <SectionBlock
@@ -1271,29 +1234,32 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         title="Appointments"
         description="Toggle scheduled outpatient appointments versus pure walk-in demand."
       >
-        <div className="field-grid">
-          <div className="field">
-            <label>Scheduled outpatient appointments</label>
-            <select
-              value={String(scenario.appointmentPolicy.enabled)}
-              onChange={(event) =>
-                updateScenario("appointmentPolicy", {
-                  ...scenario.appointmentPolicy,
-                  enabled: event.target.value === "true"
-                })
-              }
-            >
-              <option value="false">Off</option>
-              <option value="true">On</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Scheduled fraction of outpatients</label>
-            <input
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Scheduled outpatient appointments</InputLabel>
+              <Select
+                value={String(scenario.appointmentPolicy.enabled)}
+                label="Scheduled outpatient appointments"
+                onChange={(event) =>
+                  updateScenario("appointmentPolicy", {
+                    ...scenario.appointmentPolicy,
+                    enabled: event.target.value === "true"
+                  })
+                }
+              >
+                <MenuItem value="false">Off</MenuItem>
+                <MenuItem value="true">On</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField
+              label="Scheduled fraction of outpatients"
+              fullWidth
+              size="small"
               type="number"
-              min="0"
-              max="1"
-              step="0.01"
+              slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
               value={scenario.appointmentPolicy.outpatientScheduledFraction}
               onChange={(event) =>
                 updateScenario("appointmentPolicy", {
@@ -1302,13 +1268,14 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                 })
               }
             />
-          </div>
-          <div className="field">
-            <label>Early arrival minutes</label>
-            <input
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField
+              label="Early arrival minutes"
+              fullWidth
+              size="small"
               type="number"
-              min="0"
-              max="120"
+              slotProps={{ htmlInput: { min: 0, max: 120 } }}
               value={scenario.appointmentPolicy.earlyArrivalMinutes}
               onChange={(event) =>
                 updateScenario("appointmentPolicy", {
@@ -1317,13 +1284,14 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                 })
               }
             />
-          </div>
-          <div className="field">
-            <label>Appointment arrival variance minutes</label>
-            <input
+          </Grid>
+          <Grid size={{ xs: 12, sm: 6 }}>
+            <TextField
+              label="Appointment arrival variance minutes"
+              fullWidth
+              size="small"
               type="number"
-              min="0"
-              max="180"
+              slotProps={{ htmlInput: { min: 0, max: 180 } }}
               value={scenario.appointmentPolicy.arrivalVarianceMinutes}
               onChange={(event) =>
                 updateScenario("appointmentPolicy", {
@@ -1332,65 +1300,79 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                 })
               }
             />
-          </div>
-        </div>
+          </Grid>
+        </Grid>
       </SectionBlock>
     </>
-  );
+  ), [scenario, openWindow, demandPeakHour, technicianSchedulePreview, supportSchedulePreview, radiologistSchedulePreview, applyEightHourShiftPreset, goToBasic, updateOnShiftCount, updateScenario]);
 
   return (
-    <div className="stack">
+    <Stack spacing={4}>
+      {flash ? (
+        <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'primary.main', color: 'primary.contrastText' }}>
+          <Stack spacing={2}>
+            <Typography variant="body1">{flash}</Typography>
+            {queuedRunId ? (
+              <Box>
+                <Button variant="contained" color="secondary" component={Link} href={`/runs/${queuedRunId}`}>
+                  Open run status
+                </Button>
+              </Box>
+            ) : null}
+          </Stack>
+        </Paper>
+      ) : null}
+      
       {viewMode === "basic" ? basicSections : advancedSections}
 
-      <section className="panel stack">
-        <div className="eyebrow">Run</div>
-        <h3 className="section-title">Run Simulation</h3>
-        <p className="muted">Primary outputs are wait to perform the service and time from completed service to results, with revenue and utilization as supporting context.</p>
-        <div className="field-grid">
-          <div className="field">
-            <label>Horizon</label>
-            <select
-              value={runConfig.horizonDays}
-              onChange={(event) => setRunConfig((current) => ({ ...current, horizonDays: Number(event.target.value) }))}
-            >
-              {HORIZON_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option === 1 ? "1 day" : `${option} days`}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Run Type</label>
-            <select
-              value={runConfig.runType}
-              onChange={(event) => setRunConfig((current) => ({ ...current, runType: event.target.value as any }))}
-            >
-              <option value="seed">Standard Seeded Run</option>
-              <option value="montecarlo">Monte Carlo Sweep</option>
-              <option value="random">Random Seed Run</option>
-            </select>
-          </div>
-          <div className="field">
-            <label>Seed</label>
-            <input
+      <Paper variant="outlined" sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <Box>
+          <Typography variant="overline" color="primary">Run Simulation</Typography>
+          <Typography variant="h5" sx={{ mt: 1, mb: 1, fontWeight: 600 }}>Configure and Start Engine</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Primary outputs are wait to perform the service and time from completed service to results, with revenue and utilization as supporting context.
+          </Typography>
+        </Box>
+
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Horizon</InputLabel>
+              <Select
+                value={runConfig.horizonDays}
+                label="Horizon"
+                onChange={(event) => setRunConfig((current) => ({ ...current, horizonDays: Number(event.target.value) }))}
+              >
+                {HORIZON_OPTIONS.map((option) => (
+                  <MenuItem key={option} value={option}>
+                    {option === 1 ? "1 day" : `${option} days`}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField
+              label="Seed"
+              fullWidth
+              size="small"
               type="number"
-              min="1"
+              slotProps={{ htmlInput: { min: 1 } }}
               value={runConfig.seed}
               onChange={(event) => {
                 setRunSeedManuallyEdited(true);
                 setRunConfig((current) => ({ ...current, seed: Math.max(1, Number(event.target.value) || 1) }));
               }}
+              helperText="Use this for reproducible runs."
             />
-            <div className="helper-copy">Use this for reproducible runs. The same scenario and seed will produce the same result.</div>
-          </div>
-          <div className="field">
-            <label>Monte Carlo iterations</label>
-            <input
+          </Grid>
+          <Grid size={{ xs: 12, md: 4 }}>
+            <TextField
+              label="Monte Carlo iterations"
+              fullWidth
+              size="small"
               type="number"
-              min="5"
-              max="250"
-              step="5"
+              slotProps={{ htmlInput: { min: 5, max: 250, step: 5 } }}
               value={runConfig.monteCarloIterations}
               onChange={(event) =>
                 setRunConfig((current) => ({
@@ -1398,40 +1380,66 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                   monteCarloIterations: Math.max(5, Number(event.target.value) || 25)
                 }))
               }
+              helperText="Runs a sweep from the base seed."
             />
-            <div className="helper-copy">Runs a seed sweep from the base seed to show percentile bands instead of a single-seed point estimate.</div>
-          </div>
-        </div>
-        <div className="button-row" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
+          </Grid>
+        </Grid>
+
+        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
           {viewMode === "basic" ? (
-            <button type="button" className="secondary-button" disabled={isSaving} onClick={() => void goToAdvanced()}>
+            <Button variant="outlined" color="secondary" disabled={isSaving} onClick={() => void goToAdvanced()}>
               Advanced Options
-            </button>
+            </Button>
           ) : (
-            <button type="button" className="secondary-button" onClick={goToBasic}>
+            <Button variant="outlined" color="secondary" onClick={goToBasic}>
               Basic Options
-            </button>
+            </Button>
           )}
-          <button type="button" className="secondary-button" onClick={() => setScenario(DEFAULT_SCENARIO)}>
-            Reset to default
-          </button>
-          <div style={{ flexGrow: 1 }} />
-          <Link className="secondary-button" href="/">
-            Cancel
-          </Link>
-          <button type="button" className="secondary-button" disabled={isSaving || isRunPending} onClick={() => void submitScenario()}>
-            {isSaving ? "Saving..." : (mode === "create" ? "Create scenario" : "Save scenario")}
-          </button>
-          <button
-            type="button"
-            className="button"
+          <Button variant="contained" color="primary" disabled={isSaving} onClick={() => void submitScenario()}>
+            {mode === "create" ? "Create scenario" : "Save scenario"}
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
             disabled={isSaving || isRunPending}
-            onClick={() => void saveAndRun()}
+            onClick={() => {
+              setActiveRunKind("seed");
+              void saveAndRun(runConfig.seed);
+            }}
           >
-            {isRunPending ? "Queueing Simulation..." : "Save & Run Simulation"}
-          </button>
-        </div>
-      </section>
-    </div>
+            {isRunPending && activeRunKind === "seed" ? "Queueing Seeded Run..." : "Start Seeded Run"}
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
+            disabled={isSaving || isRunPending}
+            onClick={() => {
+              setActiveRunKind("montecarlo");
+              void saveAndRunMonteCarlo(runConfig.seed);
+            }}
+          >
+            {isRunPending && activeRunKind === "montecarlo" ? "Queueing Monte Carlo..." : "Start Monte Carlo"}
+          </Button>
+          <Button
+            variant="outlined"
+            color="secondary"
+            disabled={isSaving || isRunPending}
+            onClick={() => {
+              setActiveRunKind("random");
+              const randomSeed = generateRandomSeed();
+              void saveAndRun(randomSeed);
+            }}
+          >
+            {isRunPending && activeRunKind === "random" ? "Queueing Random Run..." : "Start Random Run"}
+          </Button>
+          <Button variant="outlined" color="secondary" onClick={() => setScenario(DEFAULT_SCENARIO)}>
+            Reset to sample baseline
+          </Button>
+          <Button variant="outlined" color="secondary" component={Link} href="/">
+            Back to scenarios
+          </Button>
+        </Stack>
+      </Paper>
+    </Stack>
   );
 }

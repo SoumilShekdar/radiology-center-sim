@@ -1,4 +1,12 @@
 import Link from "next/link";
+import Container from "@mui/material/Container";
+import Grid from "@mui/material/Grid";
+import Typography from "@mui/material/Typography";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Stack from "@mui/material/Stack";
+import Button from "@mui/material/Button";
+import Box from "@mui/material/Box";
 
 const tldr = [
   "Demand is stochastic: daily volume, hourly arrivals, service mix, no-shows, repeat scans, and unexpected leaves are all sampled probabilistically.",
@@ -90,55 +98,67 @@ const detailedRules = [
 
 export default function HowItWorksPage() {
   return (
-    <main className="page-shell">
-      <section className="hero">
-        <div className="hero-card">
-          <div className="eyebrow">How It Works</div>
-          <h1>How the simulator turns a scenario into wait times, results lag, and revenue.</h1>
-          <p>
-            This page describes the current simulation rules as they exist in the app today. It is intended as a practical
-            guide for setting scenarios and interpreting results.
-          </p>
-          <div className="button-row">
-            <Link className="secondary-button" href="/">
-              Back to home
-            </Link>
-            <Link className="secondary-button" href="/scenarios/new">
-              Create scenario
-            </Link>
-          </div>
-        </div>
-        <div className="panel stack">
-          <div className="eyebrow">TL;DR</div>
-          {tldr.map((item) => (
-            <div key={item} className="scenario-card">
-              {item}
-            </div>
-          ))}
-        </div>
-      </section>
+    <Container maxWidth="lg" sx={{ py: 6 }}>
+      <Grid container spacing={4} sx={{ mb: 4 }}>
+        <Grid size={{ xs: 12, md: 7 }}>
+          <Card elevation={0} variant="outlined" sx={{ p: 4, height: '100%' }}>
+            <Typography variant="overline" color="secondary" gutterBottom>How It Works</Typography>
+            <Typography variant="h1" gutterBottom sx={{ fontSize: { xs: '2.5rem', md: '3.5rem' } }}>
+              How the simulator turns a scenario into wait times, results lag, and revenue.
+            </Typography>
+            <Typography variant="body1" color="text.secondary" paragraph>
+              This page describes the current simulation rules as they exist in the app today. It is intended as a practical
+              guide for setting scenarios and interpreting results.
+            </Typography>
+            <Stack direction="row" spacing={2} sx={{ mt: 3 }}>
+              <Button component={Link} href="/" variant="outlined" size="large">
+                Back to home
+              </Button>
+              <Button component={Link} href="/scenarios/new" variant="contained" size="large">
+                Create scenario
+              </Button>
+            </Stack>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 5 }}>
+          <Card elevation={0} variant="outlined" sx={{ p: 4, height: '100%', bgcolor: 'background.default' }}>
+            <Typography variant="overline" color="secondary" gutterBottom>TL;DR</Typography>
+            <Stack spacing={2} mt={2}>
+              {tldr.map((item, index) => (
+                <Card key={index} elevation={0} variant="outlined" sx={{ p: 2 }}>
+                  <Typography variant="body2" color="text.primary">
+                    {item}
+                  </Typography>
+                </Card>
+              ))}
+            </Stack>
+          </Card>
+        </Grid>
+      </Grid>
 
-      <section className="panel stack">
-        <div>
-          <div className="eyebrow">Detailed Rules</div>
-          <h2 className="section-title">Rule-by-rule description</h2>
-          <p className="muted">These are the current operational rules used by the simulation engine.</p>
-        </div>
-        <div className="stack">
+      <Card elevation={0} variant="outlined" sx={{ p: 4, bgcolor: 'background.default' }}>
+        <Box mb={4}>
+          <Typography variant="overline" color="secondary" gutterBottom>Detailed Rules</Typography>
+          <Typography variant="h2" gutterBottom>Rule-by-rule description</Typography>
+          <Typography variant="body1" color="text.secondary">
+            These are the current operational rules used by the simulation engine.
+          </Typography>
+        </Box>
+        <Stack spacing={3}>
           {detailedRules.map((section) => (
-            <div key={section.title} className="table-card">
-              <h3>{section.title}</h3>
-              <div className="stack">
-                {section.rules.map((rule) => (
-                  <p key={rule} className="muted" style={{ margin: 0 }}>
-                    {rule}
-                  </p>
+            <Card key={section.title} elevation={0} variant="outlined" sx={{ p: 3, bgcolor: 'background.paper' }}>
+              <Typography variant="h3" gutterBottom>{section.title}</Typography>
+              <Stack spacing={1}>
+                {section.rules.map((rule, idx) => (
+                  <Typography key={idx} variant="body2" color="text.secondary">
+                    • {rule}
+                  </Typography>
                 ))}
-              </div>
-            </div>
+              </Stack>
+            </Card>
           ))}
-        </div>
-      </section>
-    </main>
+        </Stack>
+      </Card>
+    </Container>
   );
 }
