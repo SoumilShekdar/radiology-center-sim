@@ -23,7 +23,7 @@ export default async function ScenarioDetailPage({ params }: { params: Promise<{
   const handleDuplicate = async () => {
     "use server";
     const formData = new FormData();
-    formData.set("scenarioId", scenario.id);
+    formData.set("scenarioId", scenario.id ?? "");
     await duplicateScenarioAction(formData);
   };
 

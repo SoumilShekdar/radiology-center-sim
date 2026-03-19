@@ -114,13 +114,6 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     };
   });
 
-  const MetricCard = ({ title, value, subtitle }: { title: string, value: string | number, subtitle: React.ReactNode }) => (
-    <Card elevation={0} variant="outlined" sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Typography variant="overline" color="secondary" gutterBottom sx={{ lineHeight: 1.2 }}>{title}</Typography>
-      <Typography variant="h3" sx={{ mb: 1, mt: 1 }}>{value}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 'auto' }}>{subtitle}</Typography>
-    </Card>
-  );
 
   return (
     <Container maxWidth="lg" sx={{ py: 6 }}>
@@ -262,6 +255,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
               </Box>
               <Card elevation={0} variant="outlined" sx={{ p: 3, pt: 4, height: 300 }}>
                 <SimpleLineChart
+                  title="Revenue by day"
                   valueFormatter={(value) => formatCurrency(value, currency)}
                   points={allSnapshots.map((snapshot) => ({
                     label: `D${snapshot.dayIndex + 1}`,
@@ -276,6 +270,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
               </Box>
               <Card elevation={0} variant="outlined" sx={{ p: 3, pt: 4, height: 300 }}>
                 <SimpleLineChart
+                  title="Wait by day"
                   color="#356c5c"
                   valueFormatter={(value) => `${Math.round(value)}m`}
                   points={allSnapshots.map((snapshot) => ({
@@ -356,3 +351,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     </Container>
   );
 }
+
+const MetricCard = ({ title, value, subtitle }: { title: string, value: string | number, subtitle: React.ReactNode }) => (
+  <Card elevation={0} variant="outlined" sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Typography variant="overline" color="secondary" gutterBottom sx={{ lineHeight: 1.2 }}>{title}</Typography>
+    <Typography variant="h3" sx={{ mb: 1, mt: 1 }}>{value}</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ mt: 'auto' }}>{subtitle}</Typography>
+  </Card>
+);

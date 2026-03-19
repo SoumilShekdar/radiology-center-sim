@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import Button, { ButtonProps } from "@mui/material/Button";
 
 type ActionButtonProps = ButtonProps & {
-  serverAction: () => Promise<any>;
+  serverAction: () => Promise<unknown>;
   loadingText?: string;
   successText?: string;
   errorText?: string;
@@ -31,8 +31,9 @@ export function ActionButton({
           try {
             await serverAction();
             toast.success(successText);
-          } catch (e: any) {
-            toast.error(e.message || errorText);
+          } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : errorText;
+            toast.error(errorMessage);
           }
         });
       }}

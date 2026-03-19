@@ -1304,7 +1304,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         </Grid>
       </SectionBlock>
     </>
-  ), [scenario, openWindow, demandPeakHour, technicianSchedulePreview, supportSchedulePreview, radiologistSchedulePreview, applyEightHourShiftPreset, goToBasic, updateOnShiftCount, updateScenario]);
+  ), [scenario, openWindow, demandPeakHour, technicianSchedulePreview, supportSchedulePreview, radiologistSchedulePreview, applyEightHourShiftPreset, updateOnShiftCount, updateScenario]);
 
   return (
     <Stack spacing={4}>
