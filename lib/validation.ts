@@ -29,6 +29,22 @@ export const scenarioSchema = z.object({
     supportStaff: z.array(coverageSchema).length(24),
     radiologists: z.array(coverageSchema).length(24)
   }),
+  workflowConfig: z.object({
+    roomConfigs: z.array(z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      supportedModalities: z.array(z.enum(MODALITIES)).min(1),
+      dedicatedModality: z.union([z.enum(MODALITIES), z.literal("NONE")])
+    })).min(1),
+    changingRoomConfigs: z.array(z.object({
+      id: z.string().min(1),
+      name: z.string().min(1),
+      gender: z.enum(["MALE", "FEMALE", "UNISEX"])
+    })),
+    changingRoomByModality: z.object(
+      Object.fromEntries(MODALITIES.map((modality) => [modality, z.boolean()]))
+    )
+  }),
   resourceConfig: z.object({
     xRayMachines: z.number().int().min(0),
     ctMachines: z.number().int().min(0),
@@ -54,11 +70,18 @@ export const scenarioSchema = z.object({
     hourlyDistribution: z.array(z.number().nonnegative()).length(24),
     dayOfWeekMultiplier: z.array(z.number().min(0)).length(7),
     inpatientFraction: boundedPercent,
+    femaleFraction: boundedPercent,
     urgentFraction: boundedPercent,
     noShowRate: boundedPercent,
     unexpectedLeaveRate: boundedPercent,
     repeatScanRate: boundedPercent,
     resultCommunicationMinutes: z.number().int().min(0)
+  }),
+  appointmentPolicy: z.object({
+    enabled: z.boolean(),
+    outpatientScheduledFraction: boundedPercent,
+    arrivalVarianceMinutes: z.number().int().min(0).max(180),
+    earlyArrivalMinutes: z.number().int().min(0).max(120)
   }),
   serviceMix: z.array(z.object({
     modality: z.enum(MODALITIES),
@@ -79,6 +102,20 @@ export const scenarioSchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "Service distribution must sum to 1."
+    });
+  }
+
+  if (value.workflowConfig.roomConfigs.length !== value.resourceConfig.rooms) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Room definitions must match the configured room count."
+    });
+  }
+
+  if (value.workflowConfig.changingRoomConfigs.length !== value.resourceConfig.changingRooms) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Changing room definitions must match the configured changing room count."
     });
   }
 });

@@ -11,3 +11,4 @@ dist
 dev.db
 dev.db-journal
 prisma/dev.db
+.env*.local

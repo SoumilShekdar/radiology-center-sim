@@ -2,8 +2,9 @@ import Link from "next/link";
 
 const tldr = [
   "Demand is stochastic: daily volume, hourly arrivals, service mix, no-shows, repeat scans, and unexpected leaves are all sampled probabilistically.",
-  "Resources are constrained: support staff, changing rooms, rooms, technicians, radiologists, and machines all have finite hourly capacity.",
+  "Resources are constrained: support staff, explicit compatible rooms, gender-aware changing rooms, technicians, radiologists, and machines all have finite hourly capacity.",
   "Patient flow is stage-based: registration, prep, exam, reporting, and result communication are scheduled in order.",
+  "Service times are stochastic per patient: configured minutes are treated as average durations, not fixed durations every time.",
   "Revenue only counts if the patient is completed in time: exams must finish the same day, and results must be available within 24 hours of arrival.",
   "Seeds make runs reproducible: same scenario and same seed gives the same result, while a new seed gives a fresh stochastic run."
 ];
@@ -14,7 +15,8 @@ const detailedRules = [
     rules: [
       "Base daily patients are scaled by the configured day-of-week multiplier, then sampled from a Poisson distribution.",
       "Hourly demand uses the configured hourly distribution as weights, not fixed counts.",
-      "Service mix is also weight-based and sampled per patient."
+      "Service mix is also weight-based and sampled per patient.",
+      "Optional outpatient appointments create a scheduled arrival stream that competes with inpatient and urgent walk-ins."
     ]
   },
   {
@@ -32,7 +34,8 @@ const detailedRules = [
     rules: [
       "Operating hours are applied by day of week, and capacity is zero outside those windows.",
       "Staff rotation defines how many technicians, support staff, and radiologists are on shift by hour.",
-      "Machine downtime reduces effective machine count during open hours."
+      "Machine downtime is modeled as seeded outage blocks during open hours rather than a flat capacity haircut.",
+      "Radiologists can keep reporting after scan hours if their hourly staffing coverage is configured outside department operating hours."
     ]
   },
   {
@@ -40,8 +43,9 @@ const detailedRules = [
     rules: [
       "Support staff acknowledge and route the patient at registration.",
       "Prep happens next and consumes support staff time.",
-      "Only CT prep also consumes changing room capacity.",
-      "The exam consumes a room, one technician, and a machine resource.",
+      "Changing-room use is configured by modality and then routed to male, female, or unisex changing rooms based on patient gender.",
+      "Portable X-Ray does not require a procedure room; other modalities must route through compatible room definitions.",
+      "The exam consumes a compatible room when required, one technician, and a machine resource.",
       "Radiologists produce reports after exams are complete.",
       "Support staff then spend time communicating results."
     ]
@@ -60,7 +64,8 @@ const detailedRules = [
     rules: [
       "Urgent patients are prioritized ahead of non-urgent patients.",
       "Inpatients are prioritized ahead of routine outpatients.",
-      "Priority affects prep, exam, and reporting queues."
+      "Priority affects prep, exam, and reporting queues.",
+      "Patience windows are sampled per patient and vary by urgency, patient type, modality, and disruption level."
     ]
   },
   {

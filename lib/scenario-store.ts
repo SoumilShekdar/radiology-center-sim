@@ -9,7 +9,9 @@ function toPlainScenario(scenario: ScenarioInput) {
     seedDefault: scenario.seedDefault,
     downtimeRate: scenario.downtimeRate,
     operatingHours: scenario.operatingHours,
-    staffRotation: scenario.staffRotation
+    staffRotation: scenario.staffRotation,
+    workflowConfig: scenario.workflowConfig,
+    appointmentPolicy: scenario.appointmentPolicy
   };
 }
 
@@ -90,6 +92,26 @@ export async function getScenario(id: string): Promise<ScenarioInput> {
       supportStaff: (scenario.staffRotation as ScenarioInput["staffRotation"]).supportStaff,
       radiologists: (scenario.staffRotation as ScenarioInput["staffRotation"]).radiologists
     },
+    workflowConfig: (scenario.workflowConfig as ScenarioInput["workflowConfig"]) ?? {
+      roomConfigs: Array.from({ length: scenario.resourceConfig?.rooms ?? 1 }, (_, index) => ({
+        id: `room-${index + 1}`,
+        name: `Room ${index + 1}`,
+        supportedModalities: ["XRAY", "CT", "MRI", "ULTRASOUND"],
+        dedicatedModality: "NONE"
+      })),
+      changingRoomConfigs: Array.from({ length: scenario.resourceConfig?.changingRooms ?? 0 }, (_, index) => ({
+        id: `changing-room-${index + 1}`,
+        name: `Changing Room ${index + 1}`,
+        gender: "UNISEX"
+      })),
+      changingRoomByModality: {
+        XRAY: false,
+        CT: true,
+        MRI: true,
+        PORTABLE_XRAY: false,
+        ULTRASOUND: false
+      }
+    },
     resourceConfig: {
       xRayMachines: scenario.resourceConfig?.xRayMachines ?? 0,
       ctMachines: scenario.resourceConfig?.ctMachines ?? 0,
@@ -115,11 +137,18 @@ export async function getScenario(id: string): Promise<ScenarioInput> {
       hourlyDistribution: scenario.demandProfile?.hourlyDistribution as number[],
       dayOfWeekMultiplier: scenario.demandProfile?.dayOfWeekMultiplier as number[],
       inpatientFraction: scenario.demandProfile?.inpatientFraction ?? 0,
+      femaleFraction: scenario.demandProfile?.femaleFraction ?? 0.5,
       urgentFraction: scenario.demandProfile?.urgentFraction ?? 0,
       noShowRate: scenario.demandProfile?.noShowRate ?? 0,
       unexpectedLeaveRate: scenario.demandProfile?.unexpectedLeaveRate ?? 0,
       repeatScanRate: scenario.demandProfile?.repeatScanRate ?? 0,
       resultCommunicationMinutes: scenario.demandProfile?.resultCommunicationMinutes ?? 0
+    },
+    appointmentPolicy: (scenario.appointmentPolicy as ScenarioInput["appointmentPolicy"]) ?? {
+      enabled: false,
+      outpatientScheduledFraction: 0.7,
+      arrivalVarianceMinutes: 15,
+      earlyArrivalMinutes: 20
     },
     serviceMix: scenario.serviceMix.map((item) => ({
       modality: item.modality as ScenarioInput["serviceMix"][number]["modality"],

@@ -17,6 +17,27 @@ export type StaffRotation = {
   radiologists: CoveragePoint[];
 };
 
+export type PatientGender = "MALE" | "FEMALE";
+
+export type RoomConfigInput = {
+  id: string;
+  name: string;
+  supportedModalities: Modality[];
+  dedicatedModality: Modality | "NONE";
+};
+
+export type ChangingRoomConfigInput = {
+  id: string;
+  name: string;
+  gender: PatientGender | "UNISEX";
+};
+
+export type WorkflowConfigInput = {
+  roomConfigs: RoomConfigInput[];
+  changingRoomConfigs: ChangingRoomConfigInput[];
+  changingRoomByModality: Record<Modality, boolean>;
+};
+
 export type ResourceConfigInput = {
   xRayMachines: number;
   ctMachines: number;
@@ -44,11 +65,19 @@ export type DemandProfileInput = {
   hourlyDistribution: number[];
   dayOfWeekMultiplier: number[];
   inpatientFraction: number;
+  femaleFraction: number;
   urgentFraction: number;
   noShowRate: number;
   unexpectedLeaveRate: number;
   repeatScanRate: number;
   resultCommunicationMinutes: number;
+};
+
+export type AppointmentPolicyInput = {
+  enabled: boolean;
+  outpatientScheduledFraction: number;
+  arrivalVarianceMinutes: number;
+  earlyArrivalMinutes: number;
 };
 
 export type ServiceMixInput = {
@@ -66,8 +95,10 @@ export type ScenarioInput = {
   staffRotation: StaffRotation;
   downtimeRate: number;
   resourceConfig: ResourceConfigInput;
+  workflowConfig: WorkflowConfigInput;
   serviceConfigs: ServiceConfigInput[];
   demandProfile: DemandProfileInput;
+  appointmentPolicy: AppointmentPolicyInput;
   serviceMix: ServiceMixInput[];
 };
 
@@ -104,6 +135,7 @@ export type DailySnapshot = {
 };
 
 export type SimulationSummary = {
+  mode?: "SINGLE" | "MONTE_CARLO";
   horizonDays: number;
   seed: number;
   possibleRevenue: number;
@@ -128,4 +160,16 @@ export type SimulationSummary = {
   roomUtilization: number;
   changingRoomUtilization: number;
   bottleneck: string;
+  iterations?: number;
+  seedStart?: number;
+  seedEnd?: number;
+  p10ActualRevenue?: number;
+  p50ActualRevenue?: number;
+  p90ActualRevenue?: number;
+  p10P90WaitMinutes?: number;
+  p50P90WaitMinutes?: number;
+  p90P90WaitMinutes?: number;
+  p10CompletedPatients?: number;
+  p50CompletedPatients?: number;
+  p90CompletedPatients?: number;
 };

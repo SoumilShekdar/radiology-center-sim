@@ -1,19 +1,21 @@
-import { MODALITIES, MODALITY_LABELS, SLOT_MINUTES, type Modality, type PatientType } from "@/lib/constants";
+import { MODALITIES, MODALITY_LABELS, SLOT_MINUTES, type Modality, type PatientGender, type PatientType } from "@/lib/constants";
 import { createSeededRandom, samplePoisson, weightedChoice } from "@/lib/random";
 import type { DailySnapshot, RunMetric, ScenarioInput, SimulationSummary } from "@/lib/types";
 
 type ResourceKey =
   | "supportStaff"
-  | "changingRooms"
-  | "rooms"
   | "technicians"
   | "radiologists"
-  | `machine:${Modality}`;
+  | `machine:${Modality}`
+  | `room:${string}`
+  | `changingRoom:${string}`;
 
 type PatientRecord = {
   id: string;
   modality: Modality;
   patientType: PatientType;
+  gender: PatientGender;
+  scheduled: boolean;
   urgent: boolean;
   arrivalSlot: number;
   patienceDeadlineSlot: number;
@@ -32,15 +34,21 @@ type PatientRecord = {
   waitToResultMinutes: number;
   revenue: number;
   bottleneck: string;
+  prepDurationSlots: number;
+  examDurationSlots: number;
+  reportingDurationSlots: number;
+  communicationDurationSlots: number;
 };
 
 type DemandEvent = {
   id: string;
   modality: Modality;
   patientType: PatientType;
+  gender: PatientGender;
   urgent: boolean;
   arrivalSlot: number;
   patienceDeadlineSlot: number;
+  scheduled: boolean;
 };
 
 type ScheduledStage = {
@@ -65,6 +73,7 @@ type FlexibleStage = {
 
 type StageStats = {
   queuePeak: number;
+  queuePeakByDay: Int16Array;
   occupiedSupportStaff: number;
   occupiedChangingRooms: number;
   occupiedRooms: number;
@@ -92,9 +101,10 @@ type ResourceEnvironment = {
 };
 
 const REPORT_TAIL_DAYS = 7;
+const DOWNTIME_BLOCK_MAX_SLOTS = Math.ceil(120 / SLOT_MINUTES);
 
-function toSlots(minutes: number) {
-  return Math.max(1, Math.ceil(minutes / SLOT_MINUTES));
+function toSlots(minutes: number, minimumSlots = 1) {
+  return Math.max(minimumSlots, Math.ceil(minutes / SLOT_MINUTES));
 }
 
 function slotToDay(slot: number) {
@@ -118,6 +128,41 @@ function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function sampleBinomial(trials: number, probability: number, random: () => number) {
+  if (trials <= 0 || probability <= 0) {
+    return 0;
+  }
+  if (probability >= 1) {
+    return trials;
+  }
+
+  let successes = 0;
+  for (let attempt = 0; attempt < trials; attempt += 1) {
+    if (random() < probability) {
+      successes += 1;
+    }
+  }
+  return successes;
+}
+
+function sampleStandardNormal(random: () => number) {
+  const u1 = Math.max(random(), 1e-12);
+  const u2 = random();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+function sampleLogNormalMinutes(meanMinutes: number, coefficientOfVariation: number, random: () => number) {
+  if (meanMinutes <= 0) {
+    return 0;
+  }
+
+  const safeCv = Math.max(0.01, coefficientOfVariation);
+  const sigmaSquared = Math.log(1 + safeCv * safeCv);
+  const sigma = Math.sqrt(sigmaSquared);
+  const mu = Math.log(meanMinutes) - sigmaSquared / 2;
+  return Math.exp(mu + sigma * sampleStandardNormal(random));
+}
+
 function getMachineCount(scenario: ScenarioInput, modality: Modality) {
   switch (modality) {
     case "XRAY":
@@ -135,6 +180,92 @@ function getMachineCount(scenario: ScenarioInput, modality: Modality) {
 
 function getCoverageAtHour(points: ScenarioInput["staffRotation"]["technicians"], hour: number) {
   return points.find((point) => point.hour === hour)?.coverage ?? 0;
+}
+
+function isRoomResource(resource: ResourceKey): resource is `room:${string}` {
+  return resource.startsWith("room:");
+}
+
+function isChangingRoomResource(resource: ResourceKey): resource is `changingRoom:${string}` {
+  return resource.startsWith("changingRoom:");
+}
+
+function isWithinOperatingHours(scenario: ScenarioInput, slot: number) {
+  const minute = slot * SLOT_MINUTES;
+  const dayIndex = Math.floor(minute / (60 * 24));
+  const hour = Math.floor((minute % (60 * 24)) / 60);
+  const dow = dayIndex % 7;
+  const operating = scenario.operatingHours[dow];
+  return operating.enabled && hour >= operating.openHour && hour < operating.closeHour;
+}
+
+function getStageVariability(modality: Modality, stage: "prep" | "exam" | "reporting" | "communication") {
+  if (stage === "prep") {
+    return modality === "MRI" ? 0.3 : modality === "CT" ? 0.25 : 0.18;
+  }
+  if (stage === "exam") {
+    switch (modality) {
+      case "MRI":
+        return 0.3;
+      case "ULTRASOUND":
+        return 0.28;
+      case "CT":
+        return 0.22;
+      case "PORTABLE_XRAY":
+        return 0.2;
+      case "XRAY":
+        return 0.16;
+    }
+  }
+  if (stage === "reporting") {
+    return modality === "MRI" ? 0.28 : modality === "CT" ? 0.24 : 0.2;
+  }
+
+  return 0.12;
+}
+
+function sampleStageDurationSlots(
+  modality: Modality,
+  meanMinutes: number,
+  stage: "prep" | "exam" | "reporting" | "communication",
+  random: () => number,
+  minimumSlots = 1
+) {
+  if (meanMinutes <= 0) {
+    return 0;
+  }
+
+  const sampledMinutes = sampleLogNormalMinutes(meanMinutes, getStageVariability(modality, stage), random);
+  const boundedMinutes = Math.max(meanMinutes * 0.35, sampledMinutes);
+  return toSlots(boundedMinutes, minimumSlots);
+}
+
+function samplePatienceWindowMinutes(
+  event: Pick<DemandEvent, "modality" | "patientType" | "urgent">,
+  scenario: ScenarioInput,
+  random: () => number
+) {
+  const base =
+    event.patientType === "INPATIENT"
+      ? event.urgent
+        ? 300
+        : 210
+      : event.urgent
+        ? 210
+        : 110;
+
+  const modalityAdjustment =
+    event.modality === "MRI"
+      ? 40
+      : event.modality === "CT"
+        ? 20
+        : event.modality === "PORTABLE_XRAY"
+          ? -10
+          : 0;
+
+  const disruptionPenalty = scenario.demandProfile.unexpectedLeaveRate * 80;
+  const sampled = sampleLogNormalMinutes(base + modalityAdjustment, 0.35, random) - disruptionPenalty;
+  return Math.max(20, Math.min(8 * 60, sampled));
 }
 
 function buildCapacityArray(
@@ -163,17 +294,12 @@ function buildCapacityArray(
         ? Math.max(0, Math.round(scenario.resourceConfig.technicians * getCoverageAtHour(scenario.staffRotation.technicians, hour)))
         : 0;
     } else if (resource === "radiologists") {
-      capacity = withinHours
-        ? Math.max(0, Math.round(scenario.resourceConfig.radiologists * getCoverageAtHour(scenario.staffRotation.radiologists, hour)))
-        : 0;
-    } else if (resource === "rooms") {
-      capacity = withinHours ? scenario.resourceConfig.rooms : 0;
-    } else if (resource === "changingRooms") {
-      capacity = withinHours ? scenario.resourceConfig.changingRooms : 0;
+      capacity = Math.max(0, Math.round(scenario.resourceConfig.radiologists * getCoverageAtHour(scenario.staffRotation.radiologists, hour)));
+    } else if (isRoomResource(resource) || isChangingRoomResource(resource)) {
+      capacity = withinHours ? 1 : 0;
     } else {
       const modality = resource.replace("machine:", "") as Modality;
-      const effectiveCount = Math.max(0, Math.round(getMachineCount(scenario, modality) * (1 - scenario.downtimeRate)));
-      capacity = withinHours ? effectiveCount : 0;
+      capacity = withinHours ? getMachineCount(scenario, modality) : 0;
     }
 
     values[slot] = capacity;
@@ -182,19 +308,88 @@ function buildCapacityArray(
   return values;
 }
 
-function createEnvironment(scenario: ScenarioInput, horizonDays: number): ResourceEnvironment {
+function buildMachineCapacityArray(
+  scenario: ScenarioInput,
+  totalSlots: number,
+  modality: Modality,
+  random: () => number
+) {
+  const values = new Int16Array(totalSlots);
+  const machineCount = getMachineCount(scenario, modality);
+
+  for (let slot = 0; slot < totalSlots; slot += 1) {
+    values[slot] = isWithinOperatingHours(scenario, slot) ? machineCount : 0;
+  }
+
+  if (machineCount === 0 || scenario.downtimeRate <= 0) {
+    return values;
+  }
+
+  const days = Math.ceil(totalSlots / Math.ceil((24 * 60) / SLOT_MINUTES));
+
+  for (let day = 0; day < days; day += 1) {
+    const openSlots: number[] = [];
+    const dayStart = Math.floor((day * 24 * 60) / SLOT_MINUTES);
+    const dayEnd = Math.min(totalSlots, Math.floor(((day + 1) * 24 * 60) / SLOT_MINUTES));
+
+    for (let slot = dayStart; slot < dayEnd; slot += 1) {
+      if (isWithinOperatingHours(scenario, slot)) {
+        openSlots.push(slot);
+      }
+    }
+
+    if (openSlots.length === 0) {
+      continue;
+    }
+
+    for (let machine = 0; machine < machineCount; machine += 1) {
+      const unavailable = new Set<number>();
+      const targetDowntimeSlots = sampleBinomial(openSlots.length, scenario.downtimeRate, random);
+
+      while (unavailable.size < targetDowntimeSlots) {
+        const remaining = targetDowntimeSlots - unavailable.size;
+        const blockLength = Math.min(
+          remaining,
+          Math.max(1, Math.floor(random() * Math.min(DOWNTIME_BLOCK_MAX_SLOTS, remaining)) + 1)
+        );
+        const startIndex = Math.floor(random() * openSlots.length);
+
+        for (let offset = 0; offset < blockLength && startIndex + offset < openSlots.length; offset += 1) {
+          unavailable.add(openSlots[startIndex + offset]);
+        }
+      }
+
+      for (const slot of unavailable) {
+        values[slot] = Math.max(0, values[slot] - 1);
+      }
+    }
+  }
+
+  return values;
+}
+
+function createEnvironment(scenario: ScenarioInput, horizonDays: number, seed: number): ResourceEnvironment {
   const horizonSlots = Math.ceil((horizonDays * 24 * 60) / SLOT_MINUTES);
   const totalSlots = horizonSlots + Math.ceil((REPORT_TAIL_DAYS * 24 * 60) / SLOT_MINUTES);
+  const downtimeRandom = createSeededRandom(seed + 911);
+  const roomKeys = scenario.workflowConfig.roomConfigs.map((room) => `room:${room.id}` as const);
+  const changingRoomKeys = scenario.workflowConfig.changingRoomConfigs.map((room) => `changingRoom:${room.id}` as const);
   const keys: ResourceKey[] = [
     "supportStaff",
-    "changingRooms",
-    "rooms",
     "technicians",
     "radiologists",
+    ...roomKeys,
+    ...changingRoomKeys,
     ...MODALITIES.map((modality) => `machine:${modality}` as const)
   ];
 
-  const capacity = Object.fromEntries(keys.map((key) => [key, buildCapacityArray(scenario, totalSlots, key)])) as Record<ResourceKey, Int16Array>;
+  const capacity = Object.fromEntries(keys.map((key) => {
+    if (key.startsWith("machine:")) {
+      const modality = key.replace("machine:", "") as Modality;
+      return [key, buildMachineCapacityArray(scenario, totalSlots, modality, downtimeRandom)];
+    }
+    return [key, buildCapacityArray(scenario, totalSlots, key)];
+  })) as Record<ResourceKey, Int16Array>;
   const occupancy = Object.fromEntries(keys.map((key) => [key, new Int16Array(totalSlots)])) as Record<ResourceKey, Int16Array>;
 
   const utilization: UtilizationAccumulator = {
@@ -214,10 +409,14 @@ function createEnvironment(scenario: ScenarioInput, horizonDays: number): Resour
 
   for (let slot = 0; slot < horizonSlots; slot += 1) {
     utilization.supportStaffCapacity += capacity.supportStaff[slot];
-    utilization.changingRoomCapacity += capacity.changingRooms[slot];
-    utilization.roomCapacity += capacity.rooms[slot];
     utilization.technicianCapacity += capacity.technicians[slot];
     utilization.radiologistCapacity += capacity.radiologists[slot];
+    for (const roomKey of roomKeys) {
+      utilization.roomCapacity += capacity[roomKey][slot];
+    }
+    for (const changingRoomKey of changingRoomKeys) {
+      utilization.changingRoomCapacity += capacity[changingRoomKey][slot];
+    }
     for (const modality of MODALITIES) {
       utilization.machineCapacity[modality] += capacity[`machine:${modality}`][slot];
     }
@@ -230,6 +429,7 @@ function createEnvironment(scenario: ScenarioInput, horizonDays: number): Resour
     totalSlots,
     stats: {
       queuePeak: 0,
+      queuePeakByDay: new Int16Array(horizonDays),
       occupiedSupportStaff: 0,
       occupiedChangingRooms: 0,
       occupiedRooms: 0,
@@ -276,9 +476,9 @@ function commitSchedule(
       if (slot < env.horizonSlots) {
         if (resource === "supportStaff") {
           env.stats.occupiedSupportStaff += 1;
-        } else if (resource === "changingRooms") {
+        } else if (isChangingRoomResource(resource)) {
           env.stats.occupiedChangingRooms += 1;
-        } else if (resource === "rooms") {
+        } else if (isRoomResource(resource)) {
           env.stats.occupiedRooms += 1;
         } else if (resource === "technicians") {
           env.stats.occupiedTechnicians += 1;
@@ -329,6 +529,10 @@ function assignStage(
     }
 
     env.stats.queuePeak = Math.max(env.stats.queuePeak, activeQueue.length);
+    if (slot < env.horizonSlots) {
+      const dayIndex = slotToDay(slot);
+      env.stats.queuePeakByDay[dayIndex] = Math.max(env.stats.queuePeakByDay[dayIndex], activeQueue.length);
+    }
 
     let scheduledOne = true;
     while (scheduledOne) {
@@ -389,6 +593,10 @@ function assignFlexibleStage(
     }
 
     env.stats.queuePeak = Math.max(env.stats.queuePeak, activeQueue.length);
+    if (slot < env.horizonSlots) {
+      const dayIndex = slotToDay(slot);
+      env.stats.queuePeakByDay[dayIndex] = Math.max(env.stats.queuePeakByDay[dayIndex], activeQueue.length);
+    }
 
     let scheduledOne = true;
     while (scheduledOne) {
@@ -429,6 +637,7 @@ function generateDemand(scenario: ScenarioInput, horizonDays: number, seed: numb
   const random = createSeededRandom(seed);
   const events: DemandEvent[] = [];
   let sequence = 0;
+  const hourlyWeights = scenario.demandProfile.hourlyDistribution.map((weight, hour) => ({ hour, weight }));
 
   for (let day = 0; day < horizonDays; day += 1) {
     const dow = day % 7;
@@ -437,40 +646,52 @@ function generateDemand(scenario: ScenarioInput, horizonDays: number, seed: numb
       random
     );
 
-    for (let hour = 0; hour < 24; hour += 1) {
-      const hourlyCount = samplePoisson(totalPatients * scenario.demandProfile.hourlyDistribution[hour], random);
-      for (let occurrence = 0; occurrence < hourlyCount; occurrence += 1) {
-        const patientType = random() < scenario.demandProfile.inpatientFraction ? "INPATIENT" : "OUTPATIENT";
-        const urgent = random() < scenario.demandProfile.urgentFraction;
-        const modality = weightedChoice(scenario.serviceMix, random).modality;
+    for (let patientIndex = 0; patientIndex < totalPatients; patientIndex += 1) {
+      const hour = weightedChoice(hourlyWeights, random).hour;
+      const patientType = random() < scenario.demandProfile.inpatientFraction ? "INPATIENT" : "OUTPATIENT";
+      const gender = random() < scenario.demandProfile.femaleFraction ? "FEMALE" : "MALE";
+      const urgent = random() < scenario.demandProfile.urgentFraction;
+      const modality = weightedChoice(scenario.serviceMix, random).modality;
+      const scheduled =
+        scenario.appointmentPolicy.enabled &&
+        patientType === "OUTPATIENT" &&
+        !urgent &&
+        random() < scenario.appointmentPolicy.outpatientScheduledFraction;
 
-        if (patientType === "OUTPATIENT" && random() < scenario.demandProfile.noShowRate) {
-          continue;
-        }
+      if (patientType === "OUTPATIENT" && random() < scenario.demandProfile.noShowRate) {
+        continue;
+      }
 
-        const arrivalMinute = day * 24 * 60 + hour * 60 + Math.floor(random() * 60);
+      const scheduledMinute = day * 24 * 60 + hour * 60 + 30;
+      const variance = Math.round((random() * 2 - 1) * scenario.appointmentPolicy.arrivalVarianceMinutes);
+      const arrivalMinute = scheduled
+        ? Math.max(day * 24 * 60, scheduledMinute - scenario.appointmentPolicy.earlyArrivalMinutes + variance)
+        : day * 24 * 60 + hour * 60 + Math.floor(random() * 60);
+      events.push({
+        id: `patient-${sequence}`,
+        modality,
+        patientType,
+        gender,
+        urgent,
+        arrivalSlot: Math.floor(arrivalMinute / SLOT_MINUTES),
+        patienceDeadlineSlot: Math.floor((arrivalMinute + samplePatienceWindowMinutes({ modality, patientType, urgent }, scenario, random)) / SLOT_MINUTES),
+        scheduled
+      });
+      sequence += 1;
+
+      if (random() < scenario.demandProfile.repeatScanRate) {
+        const repeatMinute = arrivalMinute + 40 + Math.floor(random() * 180);
         events.push({
           id: `patient-${sequence}`,
           modality,
           patientType,
+          gender,
           urgent,
-          arrivalSlot: Math.floor(arrivalMinute / SLOT_MINUTES),
-          patienceDeadlineSlot: Math.floor((arrivalMinute + 15 + random() * 105) / SLOT_MINUTES)
+          arrivalSlot: Math.floor(repeatMinute / SLOT_MINUTES),
+          patienceDeadlineSlot: Math.floor((repeatMinute + samplePatienceWindowMinutes({ modality, patientType, urgent }, scenario, random)) / SLOT_MINUTES),
+          scheduled: false
         });
         sequence += 1;
-
-        if (random() < scenario.demandProfile.repeatScanRate) {
-          const repeatMinute = arrivalMinute + 40 + Math.floor(random() * 180);
-          events.push({
-            id: `patient-${sequence}`,
-            modality,
-            patientType,
-            urgent,
-            arrivalSlot: Math.floor(repeatMinute / SLOT_MINUTES),
-            patienceDeadlineSlot: Math.floor((repeatMinute + 15 + random() * 105) / SLOT_MINUTES)
-          });
-          sequence += 1;
-        }
       }
     }
   }
@@ -478,47 +699,192 @@ function generateDemand(scenario: ScenarioInput, horizonDays: number, seed: numb
   return events.sort((a, b) => a.arrivalSlot - b.arrivalSlot);
 }
 
-function createPatients(events: DemandEvent[], scenario: ScenarioInput): PatientRecord[] {
+function createPatients(events: DemandEvent[], scenario: ScenarioInput, random: () => number): PatientRecord[] {
   const byModality = Object.fromEntries(scenario.serviceConfigs.map((item) => [item.modality, item])) as Record<Modality, ScenarioInput["serviceConfigs"][number]>;
 
-  return events.map((event): PatientRecord => ({
-    id: event.id,
-    modality: event.modality,
-    patientType: event.patientType,
-    urgent: event.urgent,
-    arrivalSlot: event.arrivalSlot,
-    patienceDeadlineSlot: event.patienceDeadlineSlot,
-    mustFinishExamBySlot: event.arrivalSlot,
-    registrationReadySlot: event.arrivalSlot,
-    prepReadySlot: event.arrivalSlot,
-    examReadySlot: event.arrivalSlot,
-    reportReadySlot: event.arrivalSlot,
-    resultReadySlot: event.arrivalSlot,
-    completed: false,
-    deferred: false,
-    lostDueToWait: false,
-    lostDueToResult: false,
-    lostDueToUnexpectedLeave: false,
-    waitToExamMinutes: 0,
-    waitToResultMinutes: 0,
-    revenue: byModality[event.modality].charge,
-    bottleneck: "None"
-  }));
+  return events.map((event): PatientRecord => {
+    const service = byModality[event.modality];
+    return {
+      id: event.id,
+      modality: event.modality,
+      patientType: event.patientType,
+      gender: event.gender,
+      scheduled: event.scheduled,
+      urgent: event.urgent,
+      arrivalSlot: event.arrivalSlot,
+      patienceDeadlineSlot: event.patienceDeadlineSlot,
+      mustFinishExamBySlot: event.arrivalSlot,
+      registrationReadySlot: event.arrivalSlot,
+      prepReadySlot: event.arrivalSlot,
+      examReadySlot: event.arrivalSlot,
+      reportReadySlot: event.arrivalSlot,
+      resultReadySlot: event.arrivalSlot,
+      completed: false,
+      deferred: false,
+      lostDueToWait: false,
+      lostDueToResult: false,
+      lostDueToUnexpectedLeave: false,
+      waitToExamMinutes: 0,
+      waitToResultMinutes: 0,
+      revenue: service.charge,
+      bottleneck: "None",
+      prepDurationSlots: sampleStageDurationSlots(event.modality, service.prepDurationMinutes, "prep", random, 0),
+      examDurationSlots: sampleStageDurationSlots(event.modality, service.examDurationMinutes + service.cleanupMinutes, "exam", random),
+      reportingDurationSlots: sampleStageDurationSlots(event.modality, service.reportingMinutes, "reporting", random),
+      communicationDurationSlots: sampleStageDurationSlots(
+        event.modality,
+        scenario.demandProfile.resultCommunicationMinutes,
+        "communication",
+        random,
+        0
+      )
+    };
+  });
 }
 
-function requiresChangingRoom(modality: Modality) {
-  return modality === "CT";
+function requiresChangingRoom(scenario: ScenarioInput, modality: Modality) {
+  return scenario.workflowConfig.changingRoomByModality[modality];
 }
 
-function getExamResourceOptions(modality: Modality): ResourceKey[][] {
-  if (modality === "XRAY") {
-    return [
-      ["rooms", "technicians", "machine:XRAY"],
-      ["rooms", "technicians", "machine:PORTABLE_XRAY"]
-    ];
+function getChangingRoomResourceOptions(scenario: ScenarioInput, modality: Modality, gender: PatientGender): ResourceKey[][] {
+  if (!requiresChangingRoom(scenario, modality)) {
+    return [["supportStaff" as ResourceKey]];
   }
 
-  return [["rooms", "technicians", `machine:${modality}`]];
+  const options = scenario.workflowConfig.changingRoomConfigs
+    .filter((room) => room.gender === "UNISEX" || room.gender === gender)
+    .map((room) => ["supportStaff" as ResourceKey, `changingRoom:${room.id}` as ResourceKey]);
+
+  return options.length > 0 ? options : [["supportStaff" as ResourceKey]];
+}
+
+function getExamResourceOptions(scenario: ScenarioInput, modality: Modality): ResourceKey[][] {
+  const compatibleRooms = scenario.workflowConfig.roomConfigs.filter((room) => {
+    if (modality === "PORTABLE_XRAY") {
+      return false;
+    }
+    if (!room.supportedModalities.includes(modality)) {
+      return false;
+    }
+    return room.dedicatedModality === "NONE" || room.dedicatedModality === modality;
+  });
+
+  const roomOptions = compatibleRooms.map((room) => [`room:${room.id}` as ResourceKey, "technicians" as ResourceKey]);
+
+  if (modality === "XRAY") {
+    const xrayRoomOptions = roomOptions.map((option) => [...option, "machine:XRAY" as ResourceKey] as ResourceKey[]);
+    const portableOptions = roomOptions.map((option) => [...option, "machine:PORTABLE_XRAY" as ResourceKey] as ResourceKey[]);
+    return [...xrayRoomOptions, ...portableOptions];
+  }
+
+  if (modality === "PORTABLE_XRAY") {
+    return [["technicians", "machine:PORTABLE_XRAY"]];
+  }
+
+  return roomOptions.map((option) => [...option, `machine:${modality}` as ResourceKey] as ResourceKey[]);
+}
+
+function resourceLabel(resource: ResourceKey) {
+  if (resource.startsWith("machine:")) {
+    return `${MODALITY_LABELS[resource.replace("machine:", "") as Modality]} machines`;
+  }
+
+  switch (resource) {
+    case "supportStaff":
+      return "support staff";
+    case "technicians":
+      return "technicians";
+    case "radiologists":
+      return "radiologists";
+  }
+
+  if (isRoomResource(resource)) {
+    return "rooms";
+  }
+
+  if (isChangingRoomResource(resource)) {
+    return "changing rooms";
+  }
+
+  return "None";
+}
+
+function inferFlexibleStageBottleneck(
+  env: ResourceEnvironment,
+  readySlot: number,
+  deadlineSlot: number,
+  durationSlots: number,
+  options: ResourceKey[][]
+) {
+  const counts = new Map<ResourceKey, number>();
+  const finalStart = Math.max(readySlot, deadlineSlot);
+
+  for (let start = readySlot; start <= finalStart; start += 1) {
+    for (const option of options) {
+      if (canSchedule(env, start, durationSlots, option)) {
+        return "None";
+      }
+
+      const blockers = new Set<ResourceKey>();
+      for (let offset = 0; offset < durationSlots; offset += 1) {
+        const slot = start + offset;
+        if (slot >= env.totalSlots) {
+          for (const resource of option) {
+            blockers.add(resource);
+          }
+          break;
+        }
+
+        for (const resource of option) {
+          if (env.capacity[resource][slot] <= env.occupancy[resource][slot]) {
+            blockers.add(resource);
+          }
+        }
+      }
+
+      for (const blocker of blockers) {
+        counts.set(blocker, (counts.get(blocker) ?? 0) + 1);
+      }
+    }
+  }
+
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+  return top ? resourceLabel(top) : "None";
+}
+
+function utilizationForResource(
+  occupancy: Int16Array,
+  capacity: Int16Array,
+  startSlot: number,
+  endSlot: number
+) {
+  let occupied = 0;
+  let available = 0;
+  for (let slot = startSlot; slot < endSlot; slot += 1) {
+    occupied += occupancy[slot];
+    available += capacity[slot];
+  }
+
+  return available === 0 ? 0 : (occupied / available) * 100;
+}
+
+function utilizationForResources(
+  env: ResourceEnvironment,
+  resources: ResourceKey[],
+  startSlot: number,
+  endSlot: number
+) {
+  let occupied = 0;
+  let available = 0;
+
+  for (const resource of resources) {
+    for (let slot = startSlot; slot < endSlot; slot += 1) {
+      occupied += env.occupancy[resource][slot];
+      available += env.capacity[resource][slot];
+    }
+  }
+
+  return available === 0 ? 0 : (occupied / available) * 100;
 }
 
 function dayEndSlot(slot: number) {
@@ -555,11 +921,19 @@ function findBottleneck(scenario: ScenarioInput, modality: Modality) {
 }
 
 export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed: number) {
-  const env = createEnvironment(scenario, horizonDays);
+  const env = createEnvironment(scenario, horizonDays, seed);
   const events = generateDemand(scenario, horizonDays, seed);
-  const patients = createPatients(events, scenario);
   const random = createSeededRandom(seed + 17);
+  const patients = createPatients(events, scenario, random);
   const serviceLookup = Object.fromEntries(scenario.serviceConfigs.map((item) => [item.modality, item])) as Record<Modality, ScenarioInput["serviceConfigs"][number]>;
+  const bottleneckSignals = new Map<string, number>();
+
+  const noteBottleneck = (label: string) => {
+    if (label === "None") {
+      return;
+    }
+    bottleneckSignals.set(label, (bottleneckSignals.get(label) ?? 0) + 1);
+  };
 
   const registrationResult = assignStage(env, patients.map((patient) => ({
     patientId: patient.id,
@@ -576,7 +950,15 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
   }
 
   for (const patient of patients) {
-    if (random() < scenario.demandProfile.unexpectedLeaveRate) {
+    const registrationWaitMinutes = Math.max(0, (patient.registrationReadySlot - patient.arrivalSlot) * SLOT_MINUTES);
+    const leaveRisk = Math.min(
+      0.95,
+      scenario.demandProfile.unexpectedLeaveRate *
+        (1 + registrationWaitMinutes / 45) *
+        (patient.patientType === "OUTPATIENT" ? (patient.scheduled ? 1.35 : 1.2) : 0.8) *
+        (patient.urgent ? 0.5 : 1)
+    );
+    if (random() < leaveRisk) {
       patient.deferred = true;
       patient.lostDueToUnexpectedLeave = true;
       patient.bottleneck = "unexpected leave";
@@ -585,49 +967,79 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
 
   const activePatients = patients.filter((patient) => !patient.deferred);
 
-  const prepResult = assignStage(env, activePatients.map((patient) => ({
+  const prepSimplePatients = activePatients.filter((patient) => patient.prepDurationSlots > 0 && !requiresChangingRoom(scenario, patient.modality));
+  const prepChangingPatients = activePatients.filter((patient) => patient.prepDurationSlots > 0 && requiresChangingRoom(scenario, patient.modality));
+
+  const prepResult = assignStage(env, prepSimplePatients.map((patient) => ({
     patientId: patient.id,
     modality: patient.modality,
     readySlot: patient.registrationReadySlot,
     priority: patient.urgent ? 2 : patient.patientType === "INPATIENT" ? 1 : 0,
-    durationSlots: toSlots(serviceLookup[patient.modality].prepDurationMinutes || SLOT_MINUTES),
-    resources:
-      serviceLookup[patient.modality].prepDurationMinutes > 0
-        ? requiresChangingRoom(patient.modality)
-          ? ["supportStaff", "changingRooms"]
-          : ["supportStaff"]
-        : ["supportStaff"]
+    durationSlots: patient.prepDurationSlots,
+    resources: ["supportStaff"]
+  })));
+
+  const prepChangingResult = assignFlexibleStage(env, prepChangingPatients.map((patient) => ({
+    patientId: patient.id,
+    modality: patient.modality,
+    readySlot: patient.registrationReadySlot,
+    priority: patient.urgent ? 2 : patient.patientType === "INPATIENT" ? 1 : 0,
+    durationSlots: patient.prepDurationSlots,
+    resourceOptions: getChangingRoomResourceOptions(scenario, patient.modality, patient.gender),
+    deadlineSlot: patient.patienceDeadlineSlot
   })));
 
   for (const patient of activePatients) {
-    const prepDurationSlots = toSlots(serviceLookup[patient.modality].prepDurationMinutes || SLOT_MINUTES);
-    const start = prepResult.starts.get(patient.id) ?? patient.registrationReadySlot;
+    const prepDurationSlots = patient.prepDurationSlots;
+    if (prepDurationSlots === 0) {
+      patient.prepReadySlot = patient.registrationReadySlot;
+      continue;
+    }
+
+    const start = prepResult.starts.get(patient.id) ?? prepChangingResult.starts.get(patient.id);
+    if (start === undefined || prepChangingResult.missed.has(patient.id)) {
+      patient.deferred = true;
+      patient.lostDueToWait = true;
+      patient.bottleneck = requiresChangingRoom(scenario, patient.modality) ? "changing rooms" : "support staff";
+      noteBottleneck(patient.bottleneck);
+      continue;
+    }
+
     patient.prepReadySlot = start + prepDurationSlots;
   }
 
-  for (const patient of activePatients) {
-    const examDurationSlots = toSlots(serviceLookup[patient.modality].examDurationMinutes + serviceLookup[patient.modality].cleanupMinutes);
+  const examCandidates = activePatients.filter((patient) => !patient.deferred);
+
+  for (const patient of examCandidates) {
+    const examDurationSlots = patient.examDurationSlots;
     patient.mustFinishExamBySlot = Math.min(patient.patienceDeadlineSlot, dayEndSlot(patient.arrivalSlot) - examDurationSlots);
   }
 
-  const examResult = assignFlexibleStage(env, activePatients.map((patient) => ({
+  const examResult = assignFlexibleStage(env, examCandidates.map((patient) => ({
     patientId: patient.id,
     modality: patient.modality,
     readySlot: patient.prepReadySlot,
     priority: patient.urgent ? 3 : patient.patientType === "INPATIENT" ? 2 : 1,
-    durationSlots: toSlots(serviceLookup[patient.modality].examDurationMinutes + serviceLookup[patient.modality].cleanupMinutes),
-    resourceOptions: getExamResourceOptions(patient.modality),
+    durationSlots: patient.examDurationSlots,
+    resourceOptions: getExamResourceOptions(scenario, patient.modality),
     deadlineSlot: patient.mustFinishExamBySlot
   })));
 
-  for (const patient of activePatients) {
-    const examDurationSlots = toSlots(serviceLookup[patient.modality].examDurationMinutes + serviceLookup[patient.modality].cleanupMinutes);
+  for (const patient of examCandidates) {
+    const examDurationSlots = patient.examDurationSlots;
     const examStart = examResult.starts.get(patient.id);
 
     if (examStart === undefined || examStart >= env.totalSlots - examDurationSlots || examResult.missed.has(patient.id)) {
       patient.deferred = true;
       patient.lostDueToWait = true;
-      patient.bottleneck = findBottleneck(scenario, patient.modality);
+      patient.bottleneck = inferFlexibleStageBottleneck(
+        env,
+        patient.prepReadySlot,
+        patient.mustFinishExamBySlot,
+        examDurationSlots,
+        getExamResourceOptions(scenario, patient.modality)
+      );
+      noteBottleneck(patient.bottleneck);
       continue;
     }
 
@@ -641,7 +1053,7 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
     modality: patient.modality,
     readySlot: patient.examReadySlot,
     priority: patient.urgent ? 3 : patient.patientType === "INPATIENT" ? 2 : 1,
-    durationSlots: toSlots(serviceLookup[patient.modality].reportingMinutes),
+    durationSlots: patient.reportingDurationSlots,
     resources: ["radiologists"]
   })));
 
@@ -649,9 +1061,9 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
   const communicationResult = assignStage(env, communicationCandidates.map((patient) => ({
     patientId: patient.id,
     modality: patient.modality,
-    readySlot: (reportResult.starts.get(patient.id) ?? patient.examReadySlot) + toSlots(serviceLookup[patient.modality].reportingMinutes),
+    readySlot: (reportResult.starts.get(patient.id) ?? patient.examReadySlot) + patient.reportingDurationSlots,
     priority: patient.patientType === "INPATIENT" ? 1 : 0,
-    durationSlots: toSlots(scenario.demandProfile.resultCommunicationMinutes || SLOT_MINUTES),
+    durationSlots: patient.communicationDurationSlots,
     resources: ["supportStaff"]
   })), false);
 
@@ -661,13 +1073,18 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
       patient.deferred = true;
       patient.lostDueToResult = true;
       patient.bottleneck = "radiologists";
+      noteBottleneck(patient.bottleneck);
       continue;
     }
 
-    const reportEnd = reportStart + toSlots(serviceLookup[patient.modality].reportingMinutes);
-    const communicationStart = communicationResult.starts.get(patient.id) ?? reportEnd;
+    const reportingSlots = patient.reportingDurationSlots;
+    const communicationSlots = patient.communicationDurationSlots;
+    const reportEnd = reportStart + reportingSlots;
+    const communicationStart = communicationSlots === 0
+      ? reportEnd
+      : (communicationResult.starts.get(patient.id) ?? reportEnd);
     patient.reportReadySlot = reportEnd;
-    patient.resultReadySlot = communicationStart + toSlots(scenario.demandProfile.resultCommunicationMinutes || SLOT_MINUTES);
+    patient.resultReadySlot = communicationStart + communicationSlots;
     patient.waitToResultMinutes = Math.max(0, (patient.resultReadySlot - patient.examReadySlot) * SLOT_MINUTES);
     patient.completed =
       patient.resultReadySlot < env.totalSlots &&
@@ -675,8 +1092,22 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
       patient.examReadySlot <= dayEndSlot(patient.arrivalSlot);
     if (!patient.completed) {
       patient.lostDueToResult = true;
+      patient.bottleneck = communicationSlots > 0 && !communicationResult.starts.has(patient.id) ? "support staff" : "radiologists";
+      noteBottleneck(patient.bottleneck);
+      continue;
     }
-    patient.bottleneck = patient.waitToResultMinutes - patient.waitToExamMinutes > 90 ? "radiologists" : findBottleneck(scenario, patient.modality);
+
+    const examQueueMinutes = patient.waitToExamMinutes;
+    const reportQueueMinutes = Math.max(0, (reportStart - patient.examReadySlot) * SLOT_MINUTES);
+    const communicationQueueMinutes = Math.max(0, (communicationStart - reportEnd) * SLOT_MINUTES);
+    if (reportQueueMinutes >= examQueueMinutes && reportQueueMinutes >= communicationQueueMinutes) {
+      patient.bottleneck = "radiologists";
+    } else if (communicationQueueMinutes >= examQueueMinutes) {
+      patient.bottleneck = "support staff";
+    } else {
+      patient.bottleneck = findBottleneck(scenario, patient.modality);
+    }
+    noteBottleneck(patient.bottleneck);
   }
 
   const completedPatients = patients.filter((patient) => patient.completed && !patient.deferred && slotToDay(patient.examReadySlot) < horizonDays);
@@ -727,13 +1158,7 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
     roomUtilization: env.utilization.roomCapacity === 0 ? 0 : (env.stats.occupiedRooms / env.utilization.roomCapacity) * 100,
     changingRoomUtilization:
       env.utilization.changingRoomCapacity === 0 ? 0 : (env.stats.occupiedChangingRooms / env.utilization.changingRoomCapacity) * 100,
-    bottleneck: (() => {
-      const counts = new Map<string, number>();
-      for (const patient of patients) {
-        counts.set(patient.bottleneck, (counts.get(patient.bottleneck) ?? 0) + 1);
-      }
-      return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "None";
-    })()
+    bottleneck: [...bottleneckSignals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "None"
   };
 
   const metrics: RunMetric[] = [
@@ -781,12 +1206,26 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
     );
   }
 
+  const roomResources = scenario.workflowConfig.roomConfigs.map((room) => `room:${room.id}` as ResourceKey);
+  const changingRoomResources = scenario.workflowConfig.changingRoomConfigs.map((room) => `changingRoom:${room.id}` as ResourceKey);
   const snapshots: DailySnapshot[] = [];
   for (let day = 0; day < horizonDays; day += 1) {
+    const dayStartSlot = Math.floor((day * 24 * 60) / SLOT_MINUTES);
+    const dayEndSlotExclusive = Math.min(env.horizonSlots, Math.floor(((day + 1) * 24 * 60) / SLOT_MINUTES));
     const dayPatients = completedPatients.filter((patient) => slotToDay(patient.examReadySlot) === day);
     const dayDeferred = deferredPatients.filter((patient) => slotToDay(patient.arrivalSlot) === day);
     const dayWaits = dayPatients.map((patient) => patient.waitToExamMinutes);
     const dayResults = dayPatients.map((patient) => patient.waitToResultMinutes);
+    const dailyMachineUtilization = average(
+      MODALITIES.map((modality) =>
+        utilizationForResource(
+          env.occupancy[`machine:${modality}`],
+          env.capacity[`machine:${modality}`],
+          dayStartSlot,
+          dayEndSlotExclusive
+        )
+      )
+    );
 
     const allSnapshot: DailySnapshot = {
       dayIndex: day,
@@ -798,12 +1237,12 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
       averageWaitMinutes: average(dayWaits),
       averageResultMinutes: average(dayResults),
       p90WaitMinutes: percentile(dayWaits, 0.9),
-      queuePeak: env.stats.queuePeak,
-      machineUtilization: summary.machineUtilization,
-      technicianUtilization: summary.technicianUtilization,
-      radiologistUtilization: summary.radiologistUtilization,
-      roomUtilization: summary.roomUtilization,
-      changingRoomUtilization: summary.changingRoomUtilization
+      queuePeak: env.stats.queuePeakByDay[day],
+      machineUtilization: dailyMachineUtilization,
+      technicianUtilization: utilizationForResource(env.occupancy.technicians, env.capacity.technicians, dayStartSlot, dayEndSlotExclusive),
+      radiologistUtilization: utilizationForResource(env.occupancy.radiologists, env.capacity.radiologists, dayStartSlot, dayEndSlotExclusive),
+      roomUtilization: utilizationForResources(env, roomResources, dayStartSlot, dayEndSlotExclusive),
+      changingRoomUtilization: utilizationForResources(env, changingRoomResources, dayStartSlot, dayEndSlotExclusive)
     };
     snapshots.push(allSnapshot);
 
@@ -821,16 +1260,122 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
         averageWaitMinutes: average(waitsForModality),
         averageResultMinutes: average(resultsForModality),
         p90WaitMinutes: percentile(waitsForModality, 0.9),
-        queuePeak: env.stats.queuePeak,
-        machineUtilization:
-          env.utilization.machineCapacity[modality] === 0 ? 0 : (env.stats.occupiedMachines[modality] / env.utilization.machineCapacity[modality]) * 100,
-        technicianUtilization: summary.technicianUtilization,
-        radiologistUtilization: summary.radiologistUtilization,
-        roomUtilization: summary.roomUtilization,
-        changingRoomUtilization: summary.changingRoomUtilization
+        queuePeak: env.stats.queuePeakByDay[day],
+        machineUtilization: utilizationForResource(
+          env.occupancy[`machine:${modality}`],
+          env.capacity[`machine:${modality}`],
+          dayStartSlot,
+          dayEndSlotExclusive
+        ),
+        technicianUtilization: utilizationForResource(env.occupancy.technicians, env.capacity.technicians, dayStartSlot, dayEndSlotExclusive),
+        radiologistUtilization: utilizationForResource(env.occupancy.radiologists, env.capacity.radiologists, dayStartSlot, dayEndSlotExclusive),
+        roomUtilization: utilizationForResources(env, roomResources, dayStartSlot, dayEndSlotExclusive),
+        changingRoomUtilization: utilizationForResources(env, changingRoomResources, dayStartSlot, dayEndSlotExclusive)
       });
     }
   }
+
+  return { summary, metrics, snapshots };
+}
+
+export function runMonteCarlo(scenario: ScenarioInput, horizonDays: number, seedStart: number, iterations: number) {
+  const runs = Array.from({ length: iterations }, (_, index) => runSimulation(scenario, horizonDays, seedStart + index));
+  const summaries = runs.map((run) => run.summary);
+  const actualRevenueSeries = summaries.map((summary) => summary.actualRevenue);
+  const p90WaitSeries = summaries.map((summary) => summary.p90WaitMinutes);
+  const completedSeries = summaries.map((summary) => summary.completedPatients);
+  const bottleneckCounts = new Map<string, number>();
+
+  for (const summary of summaries) {
+    bottleneckCounts.set(summary.bottleneck, (bottleneckCounts.get(summary.bottleneck) ?? 0) + 1);
+  }
+
+  const summary: SimulationSummary = {
+    mode: "MONTE_CARLO",
+    horizonDays,
+    seed: seedStart,
+    iterations,
+    seedStart,
+    seedEnd: seedStart + iterations - 1,
+    possibleRevenue: average(summaries.map((item) => item.possibleRevenue)),
+    maximumRevenue: average(summaries.map((item) => item.maximumRevenue)),
+    actualRevenue: average(actualRevenueSeries),
+    lostRevenue: average(summaries.map((item) => item.lostRevenue)),
+    lostRevenueDueToWait: average(summaries.map((item) => item.lostRevenueDueToWait)),
+    lostRevenueDueToResult: average(summaries.map((item) => item.lostRevenueDueToResult)),
+    lostRevenueDueToUnexpectedLeave: average(summaries.map((item) => item.lostRevenueDueToUnexpectedLeave)),
+    completedPatients: average(completedSeries),
+    deferredPatients: average(summaries.map((item) => item.deferredPatients)),
+    averageWaitMinutes: average(summaries.map((item) => item.averageWaitMinutes)),
+    averageResultMinutes: average(summaries.map((item) => item.averageResultMinutes)),
+    p50WaitMinutes: percentile(summaries.map((item) => item.p50WaitMinutes), 0.5),
+    p90WaitMinutes: average(p90WaitSeries),
+    p50ResultMinutes: percentile(summaries.map((item) => item.p50ResultMinutes), 0.5),
+    p90ResultMinutes: average(summaries.map((item) => item.p90ResultMinutes)),
+    p95WaitMinutes: average(summaries.map((item) => item.p95WaitMinutes)),
+    machineUtilization: average(summaries.map((item) => item.machineUtilization)),
+    technicianUtilization: average(summaries.map((item) => item.technicianUtilization)),
+    radiologistUtilization: average(summaries.map((item) => item.radiologistUtilization)),
+    roomUtilization: average(summaries.map((item) => item.roomUtilization)),
+    changingRoomUtilization: average(summaries.map((item) => item.changingRoomUtilization)),
+    bottleneck: [...bottleneckCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "None",
+    p10ActualRevenue: percentile(actualRevenueSeries, 0.1),
+    p50ActualRevenue: percentile(actualRevenueSeries, 0.5),
+    p90ActualRevenue: percentile(actualRevenueSeries, 0.9),
+    p10P90WaitMinutes: percentile(p90WaitSeries, 0.1),
+    p50P90WaitMinutes: percentile(p90WaitSeries, 0.5),
+    p90P90WaitMinutes: percentile(p90WaitSeries, 0.9),
+    p10CompletedPatients: percentile(completedSeries, 0.1),
+    p50CompletedPatients: percentile(completedSeries, 0.5),
+    p90CompletedPatients: percentile(completedSeries, 0.9)
+  };
+
+  const metrics: RunMetric[] = [
+    { modality: "ALL", metricName: "actualRevenueMean", metricValue: summary.actualRevenue },
+    { modality: "ALL", metricName: "actualRevenueP10", metricValue: summary.p10ActualRevenue ?? 0 },
+    { modality: "ALL", metricName: "actualRevenueP50", metricValue: summary.p50ActualRevenue ?? 0 },
+    { modality: "ALL", metricName: "actualRevenueP90", metricValue: summary.p90ActualRevenue ?? 0 },
+    { modality: "ALL", metricName: "p90WaitP10", metricValue: summary.p10P90WaitMinutes ?? 0 },
+    { modality: "ALL", metricName: "p90WaitP50", metricValue: summary.p50P90WaitMinutes ?? 0 },
+    { modality: "ALL", metricName: "p90WaitP90", metricValue: summary.p90P90WaitMinutes ?? 0 },
+    { modality: "ALL", metricName: "completedPatientsP10", metricValue: summary.p10CompletedPatients ?? 0 },
+    { modality: "ALL", metricName: "completedPatientsP50", metricValue: summary.p50CompletedPatients ?? 0 },
+    { modality: "ALL", metricName: "completedPatientsP90", metricValue: summary.p90CompletedPatients ?? 0 }
+  ];
+
+  const snapshots: DailySnapshot[] = [];
+  const snapshotKeys = new Map<string, DailySnapshot[]>();
+  for (const run of runs) {
+    for (const snapshot of run.snapshots) {
+      const key = `${snapshot.dayIndex}:${snapshot.modality}`;
+      const bucket = snapshotKeys.get(key) ?? [];
+      bucket.push(snapshot);
+      snapshotKeys.set(key, bucket);
+    }
+  }
+
+  for (const [key, bucket] of snapshotKeys.entries()) {
+    const [dayIndexRaw, modality] = key.split(":");
+    snapshots.push({
+      dayIndex: Number(dayIndexRaw),
+      modality: modality as DailySnapshot["modality"],
+      throughput: Math.round(average(bucket.map((item) => item.throughput))),
+      completedPatients: Math.round(average(bucket.map((item) => item.completedPatients))),
+      deferredPatients: Math.round(average(bucket.map((item) => item.deferredPatients))),
+      revenue: average(bucket.map((item) => item.revenue)),
+      averageWaitMinutes: average(bucket.map((item) => item.averageWaitMinutes)),
+      averageResultMinutes: average(bucket.map((item) => item.averageResultMinutes)),
+      p90WaitMinutes: average(bucket.map((item) => item.p90WaitMinutes)),
+      queuePeak: Math.round(average(bucket.map((item) => item.queuePeak))),
+      machineUtilization: average(bucket.map((item) => item.machineUtilization)),
+      technicianUtilization: average(bucket.map((item) => item.technicianUtilization)),
+      radiologistUtilization: average(bucket.map((item) => item.radiologistUtilization)),
+      roomUtilization: average(bucket.map((item) => item.roomUtilization)),
+      changingRoomUtilization: average(bucket.map((item) => item.changingRoomUtilization))
+    });
+  }
+
+  snapshots.sort((a, b) => a.dayIndex - b.dayIndex || a.modality.localeCompare(b.modality));
 
   return { summary, metrics, snapshots };
 }

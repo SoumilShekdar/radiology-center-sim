@@ -16,6 +16,8 @@ model Scenario {
   downtimeRate   Float                    @default(0)
   operatingHours Json
   staffRotation  Json
+  workflowConfig Json?
+  appointmentPolicy Json?
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
   resourceConfig ScenarioResourceConfig?
@@ -62,6 +64,7 @@ model ScenarioDemandProfile {
   hourlyDistribution         Json
   dayOfWeekMultiplier        Json
   inpatientFraction          Float
+  femaleFraction             Float    @default(0.5)
   urgentFraction             Float
   noShowRate                 Float
   unexpectedLeaveRate        Float    @default(0)

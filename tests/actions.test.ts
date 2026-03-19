@@ -11,7 +11,8 @@ const mockedModules = vi.hoisted(() => ({
       count: vi.fn()
     },
     simulationRun: {
-      create: vi.fn()
+      create: vi.fn(),
+      update: vi.fn()
     }
   }
 }));
@@ -98,39 +99,6 @@ describe("server actions", () => {
   });
 
   test("runSimulationAction persists the generated run payload", async () => {
-    mockedModules.getScenario.mockResolvedValue(structuredClone(DEFAULT_SCENARIO));
-    mockedModules.runSimulation.mockReturnValue({
-      summary: {
-        seed: 44,
-        actualRevenue: 1200
-      },
-      metrics: [
-        {
-          modality: "ALL",
-          metricName: "actualRevenue",
-          metricValue: 1200
-        }
-      ],
-      snapshots: [
-        {
-          dayIndex: 0,
-          modality: "ALL",
-          throughput: 4,
-          completedPatients: 4,
-          deferredPatients: 1,
-          revenue: 1200,
-          averageWaitMinutes: 20,
-          averageResultMinutes: 60,
-          p90WaitMinutes: 40,
-          queuePeak: 3,
-          machineUtilization: 55,
-          technicianUtilization: 60,
-          radiologistUtilization: 45,
-          roomUtilization: 50,
-          changingRoomUtilization: 12
-        }
-      ]
-    });
     mockedModules.prismaMock.simulationRun.create.mockResolvedValue({ id: "run-1" });
 
     const formData = new FormData();
@@ -141,35 +109,12 @@ describe("server actions", () => {
     const result = await runSimulationAction(formData);
 
     expect(result).toEqual({ runId: "run-1" });
-    expect(mockedModules.getScenario).toHaveBeenCalledWith("scenario-2");
-    expect(mockedModules.runSimulation).toHaveBeenCalledWith(expect.objectContaining({ name: DEFAULT_SCENARIO.name }), 7, 44);
     expect(mockedModules.prismaMock.simulationRun.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         scenarioId: "scenario-2",
         horizonDays: 7,
         seed: 44,
-        status: "COMPLETED",
-        metrics: {
-          createMany: {
-            data: [
-              {
-                modality: "ALL",
-                metricName: "actualRevenue",
-                metricValue: 1200
-              }
-            ]
-          }
-        },
-        snapshots: {
-          createMany: {
-            data: [
-              expect.objectContaining({
-                dayIndex: 0,
-                revenue: 1200
-              })
-            ]
-          }
-        }
+        status: "QUEUED"
       })
     });
     expect(mockedModules.revalidatePath).toHaveBeenCalledWith("/");

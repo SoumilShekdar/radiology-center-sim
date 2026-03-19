@@ -130,9 +130,15 @@ export default async function HomePage() {
                   <div className="eyebrow">{run.scenario.name}</div>
                   <strong>{run.horizonDays === 1 ? "1 day" : `${run.horizonDays} day`} simulation</strong>
                   <div className="muted">
-                    P90 wait {Math.round(summary?.p90WaitMinutes ?? 0)} min • Actual {formatCurrency(summary?.actualRevenue ?? 0, run.scenario.currency)}
+                    {run.status === "COMPLETED"
+                      ? `P90 wait ${Math.round(summary?.p90WaitMinutes ?? 0)} min • Actual ${formatCurrency(summary?.actualRevenue ?? 0, run.scenario.currency)}`
+                      : `${run.status} • Seed ${run.seed}`}
                   </div>
-                  <div className="tag">Lost {formatCurrency(summary?.lostRevenue ?? 0, run.scenario.currency)} • {summary?.bottleneck ?? "n/a"}</div>
+                  <div className="tag">
+                    {run.status === "COMPLETED"
+                      ? `Lost ${formatCurrency(summary?.lostRevenue ?? 0, run.scenario.currency)} • ${summary?.bottleneck ?? "n/a"}`
+                      : "Open run status"}
+                  </div>
                 </Link>
               );
             })

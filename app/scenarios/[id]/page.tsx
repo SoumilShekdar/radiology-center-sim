@@ -39,10 +39,14 @@ export default async function ScenarioDetailPage({ params }: { params: Promise<{
                 <Link href={`/runs/${run.id}`} key={run.id} className="scenario-card stack">
                   <strong>{run.horizonDays === 1 ? "1 day" : `${run.horizonDays} day`} run</strong>
                   <div className="muted">
-                    Seed {run.seed} • P90 wait {Math.round(summary?.p90WaitMinutes ?? 0)} min
+                    {run.status === "COMPLETED"
+                      ? `Seed ${run.seed} • P90 wait ${Math.round(summary?.p90WaitMinutes ?? 0)} min`
+                      : `${run.status} • Seed ${run.seed}`}
                   </div>
                   <div className="tag">
-                    Actual {formatCurrency(summary?.actualRevenue ?? 0, scenario.currency)} • Lost {formatCurrency(summary?.lostRevenue ?? 0, scenario.currency)}
+                    {run.status === "COMPLETED"
+                      ? `Actual ${formatCurrency(summary?.actualRevenue ?? 0, scenario.currency)} • Lost ${formatCurrency(summary?.lostRevenue ?? 0, scenario.currency)}`
+                      : "Open run status"}
                   </div>
                 </Link>
               );
