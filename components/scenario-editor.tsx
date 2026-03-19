@@ -8,6 +8,7 @@ import { runMonteCarloAction, runSimulationAction, saveScenarioAction } from "@/
 import { SUPPORTED_CURRENCIES } from "@/lib/currency";
 import { DEFAULT_SCENARIO, SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
 import type { ScenarioInput } from "@/lib/types";
+import { toast } from "sonner";
 
 type Props = {
   initialScenario: ScenarioInput;
@@ -172,15 +173,14 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
   const router = useRouter();
   const [scenario, setScenario] = useState<ScenarioInput>(initialScenario);
   const [isSaving, setIsSaving] = useState(false);
-  const [flash, setFlash] = useState<string | null>(null);
   const [queuedRunId, setQueuedRunId] = useState<string | null>(null);
   const [runSeedManuallyEdited, setRunSeedManuallyEdited] = useState(false);
-  const [activeRunKind, setActiveRunKind] = useState<"seed" | "random" | "montecarlo" | null>(null);
   const [isRunPending, startRunTransition] = useTransition();
   const [runConfig, setRunConfig] = useState({
     horizonDays: 7,
     seed: initialScenario.seedDefault,
-    monteCarloIterations: 25
+    monteCarloIterations: 25,
+    runType: "seed" as "seed" | "montecarlo" | "random"
   });
 
   useEffect(() => {
@@ -263,14 +263,13 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
 
   const submitScenario = async (nextScenario = scenario) => {
     setIsSaving(true);
-    setFlash(null);
     const formData = new FormData();
     formData.set("scenario", JSON.stringify(nextScenario));
 
     try {
       const result = await saveScenarioAction(formData);
       setScenario((current) => ({ ...current, id: result.id }));
-      setFlash("Scenario saved.");
+      toast.success("Scenario saved successfully.");
       if (mode === "create") {
         router.replace(viewMode === "advanced" ? `/scenarios/${result.id}/advanced` : `/scenarios/${result.id}`);
       } else {
@@ -279,7 +278,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
       return result.id;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to save scenario.";
-      setFlash(message);
+      toast.error(message);
       return null;
     } finally {
       setIsSaving(false);
@@ -295,44 +294,39 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
     return Math.max(1, Math.floor(Math.random() * 2147483647));
   };
 
-  const saveAndRun = async (seedToUse: number) => {
+  const saveAndRun = async () => {
     const scenarioId = scenario.id ?? (await submitScenario());
     if (!scenarioId) {
       return;
     }
 
+    const seedToUse = runConfig.runType === "random" ? generateRandomSeed() : runConfig.seed;
+
     const formData = new FormData();
     formData.set("scenarioId", scenarioId);
     formData.set("horizonDays", String(runConfig.horizonDays));
     formData.set("seed", String(seedToUse));
-
-    startRunTransition(async () => {
-      const result = await runSimulationAction(formData);
-      setQueuedRunId(result.runId);
-      setFlash("Simulation started in the background.");
-      setActiveRunKind(null);
-      router.refresh();
-    });
-  };
-
-  const saveAndRunMonteCarlo = async (seedToUse: number) => {
-    const scenarioId = scenario.id ?? (await submitScenario());
-    if (!scenarioId) {
-      return;
+    if (runConfig.runType === "montecarlo") {
+      formData.set("iterations", String(runConfig.monteCarloIterations));
     }
 
-    const formData = new FormData();
-    formData.set("scenarioId", scenarioId);
-    formData.set("horizonDays", String(runConfig.horizonDays));
-    formData.set("seed", String(seedToUse));
-    formData.set("iterations", String(runConfig.monteCarloIterations));
-
     startRunTransition(async () => {
-      const result = await runMonteCarloAction(formData);
-      setQueuedRunId(result.runId);
-      setFlash("Monte Carlo run started in the background.");
-      setActiveRunKind(null);
-      router.refresh();
+      try {
+        const result = runConfig.runType === "montecarlo" 
+          ? await runMonteCarloAction(formData)
+          : await runSimulationAction(formData);
+          
+        setQueuedRunId(result.runId);
+        toast.success(runConfig.runType === "montecarlo" ? "Monte Carlo run started." : "Simulation started.", {
+          action: {
+            label: "View Run",
+            onClick: () => router.push(`/runs/${result.runId}`)
+          }
+        });
+        router.refresh();
+      } catch (error) {
+        toast.error("Failed to start simulation.");
+      }
     });
   };
 
@@ -1346,18 +1340,6 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
 
   return (
     <div className="stack">
-      {flash ? (
-        <div className="flash">
-          <div>{flash}</div>
-          {queuedRunId ? (
-            <div className="button-row" style={{ marginTop: 8 }}>
-              <Link className="secondary-button" href={`/runs/${queuedRunId}`}>
-                Open run status
-              </Link>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
       {viewMode === "basic" ? basicSections : advancedSections}
 
       <section className="panel stack">
@@ -1376,6 +1358,17 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                   {option === 1 ? "1 day" : `${option} days`}
                 </option>
               ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Run Type</label>
+            <select
+              value={runConfig.runType}
+              onChange={(event) => setRunConfig((current) => ({ ...current, runType: event.target.value as any }))}
+            >
+              <option value="seed">Standard Seeded Run</option>
+              <option value="montecarlo">Monte Carlo Sweep</option>
+              <option value="random">Random Seed Run</option>
             </select>
           </div>
           <div className="field">
@@ -1409,7 +1402,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
             <div className="helper-copy">Runs a seed sweep from the base seed to show percentile bands instead of a single-seed point estimate.</div>
           </div>
         </div>
-        <div className="button-row">
+        <div className="button-row" style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
           {viewMode === "basic" ? (
             <button type="button" className="secondary-button" disabled={isSaving} onClick={() => void goToAdvanced()}>
               Advanced Options
@@ -1419,49 +1412,24 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
               Basic Options
             </button>
           )}
-          <button type="button" className="button" disabled={isSaving} onClick={() => void submitScenario()}>
-            {mode === "create" ? "Create scenario" : "Save scenario"}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={isSaving || isRunPending}
-            onClick={() => {
-              setActiveRunKind("seed");
-              void saveAndRun(runConfig.seed);
-            }}
-          >
-            {isRunPending && activeRunKind === "seed" ? "Queueing Seeded Run..." : "Start Seeded Run"}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={isSaving || isRunPending}
-            onClick={() => {
-              setActiveRunKind("montecarlo");
-              void saveAndRunMonteCarlo(runConfig.seed);
-            }}
-          >
-            {isRunPending && activeRunKind === "montecarlo" ? "Queueing Monte Carlo..." : "Start Monte Carlo"}
-          </button>
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={isSaving || isRunPending}
-            onClick={() => {
-              setActiveRunKind("random");
-              const randomSeed = generateRandomSeed();
-              void saveAndRun(randomSeed);
-            }}
-          >
-            {isRunPending && activeRunKind === "random" ? "Queueing Random Run..." : "Start Random Run"}
-          </button>
           <button type="button" className="secondary-button" onClick={() => setScenario(DEFAULT_SCENARIO)}>
-            Reset to sample baseline
+            Reset to default
           </button>
+          <div style={{ flexGrow: 1 }} />
           <Link className="secondary-button" href="/">
-            Back to scenarios
+            Cancel
           </Link>
+          <button type="button" className="secondary-button" disabled={isSaving || isRunPending} onClick={() => void submitScenario()}>
+            {isSaving ? "Saving..." : (mode === "create" ? "Create scenario" : "Save scenario")}
+          </button>
+          <button
+            type="button"
+            className="button"
+            disabled={isSaving || isRunPending}
+            onClick={() => void saveAndRun()}
+          >
+            {isRunPending ? "Queueing Simulation..." : "Save & Run Simulation"}
+          </button>
         </div>
       </section>
     </div>

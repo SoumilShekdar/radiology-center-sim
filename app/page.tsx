@@ -4,6 +4,7 @@ import { createDefaultScenarioAction, seedSampleScenariosAction } from "@/lib/ac
 import { formatCurrency } from "@/lib/currency";
 import { prisma } from "@/lib/prisma";
 import { listScenarioSummaries } from "@/lib/scenario-store";
+import { ActionButton } from "@/components/action-button";
 
 export const dynamic = "force-dynamic";
 
@@ -46,16 +47,22 @@ export default async function HomePage() {
             <Link className="secondary-button" href="/how-it-works">
               How it works
             </Link>
-            <form className="inline-form" action={seedSampleScenariosAction}>
-              <button className="secondary-button" type="submit">
-                Seed sample scenarios
-              </button>
-            </form>
-            <form className="inline-form" action={createDefaultScenarioAction}>
-              <button className="secondary-button" type="submit">
-                Add starter scenario
-              </button>
-            </form>
+            <ActionButton 
+              className="secondary-button" 
+              action={seedSampleScenariosAction}
+              loadingText="Seeding..."
+              successText="Sample scenarios seeded."
+            >
+              Seed sample scenarios
+            </ActionButton>
+            <ActionButton 
+              className="secondary-button" 
+              action={createDefaultScenarioAction}
+              loadingText="Adding..."
+              successText="Starter scenario added."
+            >
+              Add starter scenario
+            </ActionButton>
           </div>
         </div>
         <div className="panel stack">
