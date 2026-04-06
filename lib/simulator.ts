@@ -641,8 +641,15 @@ function generateDemand(scenario: ScenarioInput, horizonDays: number, seed: numb
 
   for (let day = 0; day < horizonDays; day += 1) {
     const dow = day % 7;
+    let spikeMultiplier = 1;
+    let forceUrgent = false;
+    if (scenario.demandProfile.traumaSpikeProbability > 0 && random() < scenario.demandProfile.traumaSpikeProbability) {
+      spikeMultiplier = scenario.demandProfile.traumaSpikeMultiplier;
+      forceUrgent = true;
+    }
+
     const totalPatients = samplePoisson(
-      scenario.demandProfile.baseDailyPatients * scenario.demandProfile.dayOfWeekMultiplier[dow],
+      scenario.demandProfile.baseDailyPatients * scenario.demandProfile.dayOfWeekMultiplier[dow] * spikeMultiplier,
       random
     );
 
@@ -650,7 +657,7 @@ function generateDemand(scenario: ScenarioInput, horizonDays: number, seed: numb
       const hour = weightedChoice(hourlyWeights, random).hour;
       const patientType = random() < scenario.demandProfile.inpatientFraction ? "INPATIENT" : "OUTPATIENT";
       const gender = random() < scenario.demandProfile.femaleFraction ? "FEMALE" : "MALE";
-      const urgent = random() < scenario.demandProfile.urgentFraction;
+      const urgent = forceUrgent || random() < scenario.demandProfile.urgentFraction;
       const modality = weightedChoice(scenario.serviceMix, random).modality;
       const scheduled =
         scenario.appointmentPolicy.enabled &&
@@ -1117,6 +1124,26 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
   const resultWaits = completedPatients.map((patient) => patient.waitToResultMinutes);
   const possibleRevenue = patients.reduce((sum, patient) => sum + patient.revenue, 0);
   const actualRevenue = completedPatients.reduce((sum, patient) => sum + patient.revenue, 0);
+  
+  const totalConsumableCost = completedPatients.reduce((sum, patient) => sum + serviceLookup[patient.modality].consumableCost, 0);
+  let totalMachineCost = 0;
+  if (scenario.resourceConfig.machineCostModel === "LEASED") {
+    totalMachineCost = horizonDays * (
+      scenario.resourceConfig.xRayMachines * scenario.resourceConfig.xRayLeaseCostDaily +
+      scenario.resourceConfig.ctMachines * scenario.resourceConfig.ctLeaseCostDaily +
+      scenario.resourceConfig.mriMachines * scenario.resourceConfig.mriLeaseCostDaily +
+      scenario.resourceConfig.portableXRayMachines * scenario.resourceConfig.portableXRayLeaseCostDaily +
+      scenario.resourceConfig.ultrasoundMachines * scenario.resourceConfig.ultrasoundLeaseCostDaily
+    );
+  }
+  const dailyStaffCost = (
+    (scenario.resourceConfig.technicians || 0) * (scenario.resourceConfig.technicianSalaryDaily || 0) +
+    (scenario.resourceConfig.radiologists || 0) * (scenario.resourceConfig.radiologistSalaryDaily || 0) +
+    (scenario.resourceConfig.supportStaff || 0) * (scenario.resourceConfig.supportStaffSalaryDaily || 0)
+  );
+  const totalStaffCost = horizonDays * dailyStaffCost;
+  const totalCost = totalConsumableCost + totalMachineCost + totalStaffCost;
+
   const lostRevenueDueToWait = patients.filter((patient) => patient.lostDueToWait).reduce((sum, patient) => sum + patient.revenue, 0);
   const lostRevenueDueToResult = patients.filter((patient) => !patient.lostDueToWait && patient.lostDueToResult).reduce((sum, patient) => sum + patient.revenue, 0);
   const lostRevenueDueToUnexpectedLeave = patients.filter((patient) => patient.lostDueToUnexpectedLeave).reduce((sum, patient) => sum + patient.revenue, 0);
@@ -1124,12 +1151,125 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
   const inpatientPatients = completedPatients.filter((patient) => patient.patientType === "INPATIENT");
   const outpatientPatients = completedPatients.filter((patient) => patient.patientType === "OUTPATIENT");
 
+  const roomResources = scenario.workflowConfig.roomConfigs.map((room) => `room:${room.id}` as ResourceKey);
+  const changingRoomResources = scenario.workflowConfig.changingRoomConfigs.map((room) => `changingRoom:${room.id}` as ResourceKey);
+  const snapshots: DailySnapshot[] = [];
+
+  for (let day = 0; day < horizonDays; day += 1) {
+    const dayStartSlot = Math.floor((day * 24 * 60) / SLOT_MINUTES);
+    const dayEndSlotExclusive = Math.min(env.horizonSlots, Math.floor(((day + 1) * 24 * 60) / SLOT_MINUTES));
+    const dayPatients = completedPatients.filter((patient) => slotToDay(patient.examReadySlot) === day);
+    const dayDeferred = deferredPatients.filter((patient) => slotToDay(patient.arrivalSlot) === day);
+    const dayWaits = dayPatients.map((patient) => patient.waitToExamMinutes);
+    const dayResults = dayPatients.map((patient) => patient.waitToResultMinutes);
+    
+    const dailyMachineUtilization = average(
+      MODALITIES.map((modality) =>
+        utilizationForResource(
+          env.occupancy[`machine:${modality}`],
+          env.capacity[`machine:${modality}`],
+          dayStartSlot,
+          dayEndSlotExclusive
+        )
+      )
+    );
+
+    const dayConsumableCost = dayPatients.reduce((sum, patient) => sum + serviceLookup[patient.modality].consumableCost, 0);
+    let dayMachineCostAll = 0;
+    if (scenario.resourceConfig.machineCostModel === "LEASED") {
+      dayMachineCostAll = (
+        scenario.resourceConfig.xRayMachines * scenario.resourceConfig.xRayLeaseCostDaily +
+        scenario.resourceConfig.ctMachines * scenario.resourceConfig.ctLeaseCostDaily +
+        scenario.resourceConfig.mriMachines * scenario.resourceConfig.mriLeaseCostDaily +
+        scenario.resourceConfig.portableXRayMachines * scenario.resourceConfig.portableXRayLeaseCostDaily +
+        scenario.resourceConfig.ultrasoundMachines * scenario.resourceConfig.ultrasoundLeaseCostDaily
+      );
+    }
+    const dayStaffCost = dailyStaffCost;
+    const dayRevenue = dayPatients.reduce((sum, patient) => sum + patient.revenue, 0);
+    const dayTotalCost = dayConsumableCost + dayMachineCostAll + dayStaffCost;
+
+    const allSnapshot: DailySnapshot = {
+      dayIndex: day,
+      modality: "ALL",
+      throughput: dayPatients.length,
+      completedPatients: dayPatients.length,
+      deferredPatients: dayDeferred.length,
+      revenue: dayRevenue,
+      profit: dayRevenue - dayTotalCost,
+      totalCost: dayTotalCost,
+      consumableCost: dayConsumableCost,
+      machineCost: dayMachineCostAll,
+      staffCost: dayStaffCost,
+      averageWaitMinutes: average(dayWaits),
+      averageResultMinutes: average(dayResults),
+      p90WaitMinutes: percentile(dayWaits, 0.9),
+      queuePeak: env.stats.queuePeakByDay[day],
+      machineUtilization: dailyMachineUtilization,
+      technicianUtilization: utilizationForResource(env.occupancy.technicians, env.capacity.technicians, dayStartSlot, dayEndSlotExclusive),
+      radiologistUtilization: utilizationForResource(env.occupancy.radiologists, env.capacity.radiologists, dayStartSlot, dayEndSlotExclusive),
+      roomUtilization: utilizationForResources(env, roomResources, dayStartSlot, dayEndSlotExclusive),
+      changingRoomUtilization: utilizationForResources(env, changingRoomResources, dayStartSlot, dayEndSlotExclusive)
+    };
+    snapshots.push(allSnapshot);
+
+    for (const modality of MODALITIES) {
+      const subset = dayPatients.filter((patient) => patient.modality === modality);
+      const waitsForModality = subset.map((patient) => patient.waitToExamMinutes);
+      const resultsForModality = subset.map((patient) => patient.waitToResultMinutes);
+      const modalityDayConsumableCost = subset.reduce((sum, patient) => sum + serviceLookup[patient.modality].consumableCost, 0);
+      let modalityDayMachineCost = 0;
+      if (scenario.resourceConfig.machineCostModel === "LEASED") {
+        if (modality === "XRAY") modalityDayMachineCost = scenario.resourceConfig.xRayMachines * scenario.resourceConfig.xRayLeaseCostDaily;
+        if (modality === "CT") modalityDayMachineCost = scenario.resourceConfig.ctMachines * scenario.resourceConfig.ctLeaseCostDaily;
+        if (modality === "MRI") modalityDayMachineCost = scenario.resourceConfig.mriMachines * scenario.resourceConfig.mriLeaseCostDaily;
+        if (modality === "PORTABLE_XRAY") modalityDayMachineCost = scenario.resourceConfig.portableXRayMachines * scenario.resourceConfig.portableXRayLeaseCostDaily;
+        if (modality === "ULTRASOUND") modalityDayMachineCost = scenario.resourceConfig.ultrasoundMachines * scenario.resourceConfig.ultrasoundLeaseCostDaily;
+      }
+      const modalityDayRevenue = subset.reduce((sum, patient) => sum + patient.revenue, 0);
+      const modalityDayTotalCost = modalityDayConsumableCost + modalityDayMachineCost;
+
+      snapshots.push({
+        dayIndex: day,
+        modality,
+        throughput: subset.length,
+        completedPatients: subset.length,
+        deferredPatients: dayDeferred.filter((patient) => patient.modality === modality).length,
+        revenue: modalityDayRevenue,
+        profit: modalityDayRevenue - modalityDayTotalCost,
+        totalCost: modalityDayTotalCost,
+        consumableCost: modalityDayConsumableCost,
+        machineCost: modalityDayMachineCost,
+        staffCost: 0, // Staff cost is global for now
+        averageWaitMinutes: average(waitsForModality),
+        averageResultMinutes: average(resultsForModality),
+        p90WaitMinutes: percentile(waitsForModality, 0.9),
+        queuePeak: env.stats.queuePeakByDay[day],
+        machineUtilization: utilizationForResource(
+          env.occupancy[`machine:${modality}`],
+          env.capacity[`machine:${modality}`],
+          dayStartSlot,
+          dayEndSlotExclusive
+        ),
+        technicianUtilization: utilizationForResource(env.occupancy.technicians, env.capacity.technicians, dayStartSlot, dayEndSlotExclusive),
+        radiologistUtilization: utilizationForResource(env.occupancy.radiologists, env.capacity.radiologists, dayStartSlot, dayEndSlotExclusive),
+        roomUtilization: utilizationForResources(env, roomResources, dayStartSlot, dayEndSlotExclusive),
+        changingRoomUtilization: utilizationForResources(env, changingRoomResources, dayStartSlot, dayEndSlotExclusive)
+      });
+    }
+  }
+
   const summary: SimulationSummary = {
     horizonDays,
     seed,
     possibleRevenue,
     maximumRevenue,
     actualRevenue,
+    totalProfit: actualRevenue - totalCost,
+    totalCost,
+    consumableCost: totalConsumableCost,
+    machineCost: totalMachineCost,
+    staffCost: totalStaffCost,
     lostRevenue: possibleRevenue - actualRevenue,
     lostRevenueDueToWait,
     lostRevenueDueToResult,
@@ -1143,21 +1283,11 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
     p50ResultMinutes: percentile(resultWaits, 0.5),
     p90ResultMinutes: percentile(resultWaits, 0.9),
     p95WaitMinutes: percentile(waits, 0.95),
-    machineUtilization:
-      average(
-        MODALITIES.map((modality) =>
-          env.utilization.machineCapacity[modality] === 0
-            ? 0
-            : env.stats.occupiedMachines[modality] / env.utilization.machineCapacity[modality]
-        )
-      ) * 100,
-    technicianUtilization:
-      env.utilization.technicianCapacity === 0 ? 0 : (env.stats.occupiedTechnicians / env.utilization.technicianCapacity) * 100,
-    radiologistUtilization:
-      env.utilization.radiologistCapacity === 0 ? 0 : (env.stats.occupiedRadiologists / env.utilization.radiologistCapacity) * 100,
-    roomUtilization: env.utilization.roomCapacity === 0 ? 0 : (env.stats.occupiedRooms / env.utilization.roomCapacity) * 100,
-    changingRoomUtilization:
-      env.utilization.changingRoomCapacity === 0 ? 0 : (env.stats.occupiedChangingRooms / env.utilization.changingRoomCapacity) * 100,
+    machineUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.machineUtilization, 0) / horizonDays * 100,
+    technicianUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.technicianUtilization, 0) / horizonDays * 100,
+    radiologistUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.radiologistUtilization, 0) / horizonDays * 100,
+    roomUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.roomUtilization, 0) / horizonDays * 100,
+    changingRoomUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.changingRoomUtilization, 0) / horizonDays * 100,
     bottleneck: [...bottleneckSignals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "None"
   };
 
@@ -1192,6 +1322,7 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
   for (const modality of MODALITIES) {
     const subset = completedPatients.filter((patient) => patient.modality === modality);
     const modalityRevenue = subset.reduce((sum, patient) => sum + patient.revenue, 0);
+    const modalitySnapshots = snapshots.filter(s => s.modality === modality);
     metrics.push(
       { modality, metricName: "throughput", metricValue: subset.length },
       { modality, metricName: "revenue", metricValue: modalityRevenue },
@@ -1200,79 +1331,9 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
       {
         modality,
         metricName: "machineUtilization",
-        metricValue:
-          env.utilization.machineCapacity[modality] === 0 ? 0 : (env.stats.occupiedMachines[modality] / env.utilization.machineCapacity[modality]) * 100
+        metricValue: modalitySnapshots.reduce((sum, s) => sum + s.machineUtilization, 0) / horizonDays * 100
       }
     );
-  }
-
-  const roomResources = scenario.workflowConfig.roomConfigs.map((room) => `room:${room.id}` as ResourceKey);
-  const changingRoomResources = scenario.workflowConfig.changingRoomConfigs.map((room) => `changingRoom:${room.id}` as ResourceKey);
-  const snapshots: DailySnapshot[] = [];
-  for (let day = 0; day < horizonDays; day += 1) {
-    const dayStartSlot = Math.floor((day * 24 * 60) / SLOT_MINUTES);
-    const dayEndSlotExclusive = Math.min(env.horizonSlots, Math.floor(((day + 1) * 24 * 60) / SLOT_MINUTES));
-    const dayPatients = completedPatients.filter((patient) => slotToDay(patient.examReadySlot) === day);
-    const dayDeferred = deferredPatients.filter((patient) => slotToDay(patient.arrivalSlot) === day);
-    const dayWaits = dayPatients.map((patient) => patient.waitToExamMinutes);
-    const dayResults = dayPatients.map((patient) => patient.waitToResultMinutes);
-    const dailyMachineUtilization = average(
-      MODALITIES.map((modality) =>
-        utilizationForResource(
-          env.occupancy[`machine:${modality}`],
-          env.capacity[`machine:${modality}`],
-          dayStartSlot,
-          dayEndSlotExclusive
-        )
-      )
-    );
-
-    const allSnapshot: DailySnapshot = {
-      dayIndex: day,
-      modality: "ALL",
-      throughput: dayPatients.length,
-      completedPatients: dayPatients.length,
-      deferredPatients: dayDeferred.length,
-      revenue: dayPatients.reduce((sum, patient) => sum + patient.revenue, 0),
-      averageWaitMinutes: average(dayWaits),
-      averageResultMinutes: average(dayResults),
-      p90WaitMinutes: percentile(dayWaits, 0.9),
-      queuePeak: env.stats.queuePeakByDay[day],
-      machineUtilization: dailyMachineUtilization,
-      technicianUtilization: utilizationForResource(env.occupancy.technicians, env.capacity.technicians, dayStartSlot, dayEndSlotExclusive),
-      radiologistUtilization: utilizationForResource(env.occupancy.radiologists, env.capacity.radiologists, dayStartSlot, dayEndSlotExclusive),
-      roomUtilization: utilizationForResources(env, roomResources, dayStartSlot, dayEndSlotExclusive),
-      changingRoomUtilization: utilizationForResources(env, changingRoomResources, dayStartSlot, dayEndSlotExclusive)
-    };
-    snapshots.push(allSnapshot);
-
-    for (const modality of MODALITIES) {
-      const subset = dayPatients.filter((patient) => patient.modality === modality);
-      const waitsForModality = subset.map((patient) => patient.waitToExamMinutes);
-      const resultsForModality = subset.map((patient) => patient.waitToResultMinutes);
-      snapshots.push({
-        dayIndex: day,
-        modality,
-        throughput: subset.length,
-        completedPatients: subset.length,
-        deferredPatients: dayDeferred.filter((patient) => patient.modality === modality).length,
-        revenue: subset.reduce((sum, patient) => sum + patient.revenue, 0),
-        averageWaitMinutes: average(waitsForModality),
-        averageResultMinutes: average(resultsForModality),
-        p90WaitMinutes: percentile(waitsForModality, 0.9),
-        queuePeak: env.stats.queuePeakByDay[day],
-        machineUtilization: utilizationForResource(
-          env.occupancy[`machine:${modality}`],
-          env.capacity[`machine:${modality}`],
-          dayStartSlot,
-          dayEndSlotExclusive
-        ),
-        technicianUtilization: utilizationForResource(env.occupancy.technicians, env.capacity.technicians, dayStartSlot, dayEndSlotExclusive),
-        radiologistUtilization: utilizationForResource(env.occupancy.radiologists, env.capacity.radiologists, dayStartSlot, dayEndSlotExclusive),
-        roomUtilization: utilizationForResources(env, roomResources, dayStartSlot, dayEndSlotExclusive),
-        changingRoomUtilization: utilizationForResources(env, changingRoomResources, dayStartSlot, dayEndSlotExclusive)
-      });
-    }
   }
 
   return { summary, metrics, snapshots };
@@ -1300,6 +1361,11 @@ export function runMonteCarlo(scenario: ScenarioInput, horizonDays: number, seed
     possibleRevenue: average(summaries.map((item) => item.possibleRevenue)),
     maximumRevenue: average(summaries.map((item) => item.maximumRevenue)),
     actualRevenue: average(actualRevenueSeries),
+    totalProfit: average(summaries.map((item) => item.totalProfit)),
+    totalCost: average(summaries.map((item) => item.totalCost)),
+    consumableCost: average(summaries.map((item) => item.consumableCost)),
+    machineCost: average(summaries.map((item) => item.machineCost)),
+    staffCost: average(summaries.map((item) => item.staffCost || 0)),
     lostRevenue: average(summaries.map((item) => item.lostRevenue)),
     lostRevenueDueToWait: average(summaries.map((item) => item.lostRevenueDueToWait)),
     lostRevenueDueToResult: average(summaries.map((item) => item.lostRevenueDueToResult)),
@@ -1363,6 +1429,11 @@ export function runMonteCarlo(scenario: ScenarioInput, horizonDays: number, seed
       completedPatients: Math.round(average(bucket.map((item) => item.completedPatients))),
       deferredPatients: Math.round(average(bucket.map((item) => item.deferredPatients))),
       revenue: average(bucket.map((item) => item.revenue)),
+      profit: average(bucket.map((item) => item.profit)),
+      totalCost: average(bucket.map((item) => item.totalCost)),
+      consumableCost: average(bucket.map((item) => item.consumableCost)),
+      machineCost: average(bucket.map((item) => item.machineCost)),
+      staffCost: average(bucket.map((item) => item.staffCost || 0)),
       averageWaitMinutes: average(bucket.map((item) => item.averageWaitMinutes)),
       averageResultMinutes: average(bucket.map((item) => item.averageResultMinutes)),
       p90WaitMinutes: average(bucket.map((item) => item.p90WaitMinutes)),

@@ -40,6 +40,15 @@ model ScenarioResourceConfig {
   technicians          Int
   supportStaff         Int
   radiologists         Int
+  technicianSalaryDaily Float    @default(0)
+  radiologistSalaryDaily Float    @default(0)
+  supportStaffSalaryDaily Float    @default(0)
+  machineCostModel     String   @default("LEASED")
+  xRayLeaseCostDaily   Float    @default(0)
+  ctLeaseCostDaily     Float    @default(0)
+  mriLeaseCostDaily    Float    @default(0)
+  portableXRayLeaseCostDaily Float @default(0)
+  ultrasoundLeaseCostDaily   Float @default(0)
   scenario             Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
 }
 
@@ -48,6 +57,7 @@ model ScenarioServiceConfig {
   scenarioId          String
   modality            String
   charge              Float
+  consumableCost      Float    @default(0)
   examDurationMinutes Int
   prepDurationMinutes Int
   cleanupMinutes      Int
@@ -69,6 +79,8 @@ model ScenarioDemandProfile {
   noShowRate                 Float
   unexpectedLeaveRate        Float    @default(0)
   repeatScanRate             Float
+  traumaSpikeProbability     Float    @default(0)
+  traumaSpikeMultiplier      Float    @default(2.0)
   resultCommunicationMinutes Int
   scenario                   Scenario @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
 }
@@ -115,6 +127,11 @@ model SimulationRunDailySnapshot {
   completedPatients     Int
   deferredPatients      Int
   revenue               Float
+  profit                Float         @default(0)
+  totalCost             Float         @default(0)
+  consumableCost        Float         @default(0)
+  machineCost           Float         @default(0)
+  staffCost             Float         @default(0)
   averageWaitMinutes    Float
   averageResultMinutes  Float
   p90WaitMinutes        Float

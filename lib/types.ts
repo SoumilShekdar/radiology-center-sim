@@ -49,11 +49,21 @@ export type ResourceConfigInput = {
   technicians: number;
   supportStaff: number;
   radiologists: number;
+  technicianSalaryDaily: number;
+  radiologistSalaryDaily: number;
+  supportStaffSalaryDaily: number;
+  machineCostModel: "LEASED" | "OWNED";
+  xRayLeaseCostDaily: number;
+  ctLeaseCostDaily: number;
+  mriLeaseCostDaily: number;
+  portableXRayLeaseCostDaily: number;
+  ultrasoundLeaseCostDaily: number;
 };
 
 export type ServiceConfigInput = {
   modality: Modality;
   charge: number;
+  consumableCost: number;
   examDurationMinutes: number;
   prepDurationMinutes: number;
   cleanupMinutes: number;
@@ -70,6 +80,8 @@ export type DemandProfileInput = {
   noShowRate: number;
   unexpectedLeaveRate: number;
   repeatScanRate: number;
+  traumaSpikeProbability: number;
+  traumaSpikeMultiplier: number;
   resultCommunicationMinutes: number;
 };
 
@@ -123,6 +135,11 @@ export type DailySnapshot = {
   completedPatients: number;
   deferredPatients: number;
   revenue: number;
+  profit: number;
+  totalCost: number;
+  consumableCost: number;
+  machineCost: number;
+  staffCost: number;
   averageWaitMinutes: number;
   averageResultMinutes: number;
   p90WaitMinutes: number;
@@ -141,6 +158,11 @@ export type SimulationSummary = {
   possibleRevenue: number;
   maximumRevenue: number;
   actualRevenue: number;
+  totalProfit: number;
+  totalCost: number;
+  consumableCost: number;
+  machineCost: number;
+  staffCost: number;
   lostRevenue: number;
   lostRevenueDueToWait: number;
   lostRevenueDueToResult: number;

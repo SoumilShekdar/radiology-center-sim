@@ -133,27 +133,50 @@ function HourlyDemandChart({
   const maxValue = Math.max(...values, 0.01);
 
   return (
-    <div className="stack">
-      <div className="demand-chart">
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 120, width: "100%" }}>
         {values.map((value, index) => (
-          <div className="demand-bar-group" key={`bar-${index}`}>
+          <div
+            key={`bar-${index}`}
+            style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0, height: "100%" }}
+          >
             <button
               type="button"
-              className="demand-bar-button"
+              title={`Hour ${index}: ${(value * 100).toFixed(1)}%`}
               onClick={() => {
                 const next = [...values];
                 next[index] = Number((next[index] + 0.01).toFixed(4));
                 onChange(next);
               }}
               aria-label={`Increase demand for hour ${index}`}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+                width: "100%",
+                flex: 1,
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+              }}
             >
-              <div className="demand-bar-fill" style={{ height: `${Math.max(6, (value / maxValue) * 100)}%` }} />
+              <div
+                style={{
+                  width: "100%",
+                  height: `${Math.max(4, (value / maxValue) * 100)}%`,
+                  background: value > 0 ? "var(--mui-palette-primary-main, #1976d2)" : "var(--mui-palette-divider, #e0e0e0)",
+                  borderRadius: "2px 2px 0 0",
+                  transition: "height 0.15s ease",
+                  opacity: value > 0 ? 0.7 + (value / maxValue) * 0.3 : 0.2,
+                }}
+              />
             </button>
-            <span className="demand-bar-label">{index}</span>
+            <span style={{ fontSize: 9, color: "#888", marginTop: 2, lineHeight: 1 }}>{index}</span>
           </div>
         ))}
       </div>
-      <div className="muted">Each bar is an hour of the day. Click a bar to bump that hour up, or edit the exact values below.</div>
+      <div style={{ fontSize: 12, color: "#888" }}>Each bar is an hour of the day. Click a bar to bump that hour up, or edit the exact values below.</div>
     </div>
   );
 }
@@ -520,25 +543,78 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
 
       <SectionBlock
         kicker="Section 2"
-        title="Infrastructure Setup"
-        description="Configure machine counts and physical spaces. Portable X-Ray machines act as flexible X-Ray capacity for immobile patients."
+        title="Infrastructure Setup & Costs"
+        description="Configure machine counts, physical spaces, and the equipment cost model."
         defaultOpen
       >
         <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'rgba(37,99,235,0.04)', color: 'text.secondary', mb: 3 }}>
           <Typography variant="body2">
-            Portable X-Ray is a special X-Ray path for immobile patients, but standard X-Ray requests can still spill over to portable machines when needed.
+            Portable X-Ray is a special X-Ray path for immobile patients. Lease costs are fixed daily costs applied independently of utilization.
           </Typography>
         </Paper>
-        <Grid container spacing={3}>
-          {[
-            ["xRayMachines", "X-Ray machines"],
-            ["ctMachines", "CT scanners"],
-            ["mriMachines", "MRI scanners"],
-            ["portableXRayMachines", "Portable X-Ray machines"],
-            ["ultrasoundMachines", "Ultrasounds"],
-            ["rooms", "Procedure rooms"],
-            ["changingRooms", "Changing rooms"]
-          ].map(([key, label]) => (
+        <Stack spacing={3}>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, md: 6 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Machine Cost Model</InputLabel>
+                <Select
+                  value={scenario.resourceConfig.machineCostModel}
+                  label="Machine Cost Model"
+                  onChange={(event) =>
+                    updateScenario("resourceConfig", {
+                      ...scenario.resourceConfig,
+                      machineCostModel: event.target.value as "LEASED" | "OWNED"
+                    })
+                  }
+                >
+                  <MenuItem value="LEASED">Daily Leased</MenuItem>
+                  <MenuItem value="OWNED">Owned (No daily cost)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
+          {scenario.resourceConfig.machineCostModel === "LEASED" && (
+            <Paper variant="outlined" sx={{ p: 2 }}>
+              <Typography variant="subtitle2" sx={{ mb: 2 }}>Daily Lease Costs per Modality Unit</Typography>
+              <Grid container spacing={2}>
+                {[
+                  ["xRayLeaseCostDaily", "X-Ray Lease/Day"],
+                  ["ctLeaseCostDaily", "CT Lease/Day"],
+                  ["mriLeaseCostDaily", "MRI Lease/Day"],
+                  ["portableXRayLeaseCostDaily", "Portable X-Ray Lease/Day"],
+                  ["ultrasoundLeaseCostDaily", "Ultrasound Lease/Day"]
+                ].map(([key, label]) => (
+                  <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key}>
+                    <TextField
+                      label={label}
+                      fullWidth
+                      size="small"
+                      type="number"
+                      slotProps={{ htmlInput: { min: 0 } }}
+                      value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
+                      onChange={(event) =>
+                        updateScenario("resourceConfig", {
+                          ...scenario.resourceConfig,
+                          [key]: Number(event.target.value)
+                        })
+                      }
+                    />
+                  </Grid>
+                ))}
+              </Grid>
+            </Paper>
+          )}
+          <Typography variant="subtitle2">Physical Infrastructure Counts</Typography>
+          <Grid container spacing={3}>
+            {[
+              ["xRayMachines", "X-Ray machines"],
+              ["ctMachines", "CT scanners"],
+              ["mriMachines", "MRI scanners"],
+              ["portableXRayMachines", "Portable X-Ray machines"],
+              ["ultrasoundMachines", "Ultrasounds"],
+              ["rooms", "Procedure rooms"],
+              ["changingRooms", "Changing rooms"]
+            ].map(([key, label]) => (
             <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key}>
               <TextField
                 label={label}
@@ -571,6 +647,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
             </Grid>
           ))}
         </Grid>
+        </Stack>
       </SectionBlock>
 
       <SectionBlock
@@ -589,6 +666,31 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
               <TextField
                 label={label}
                 fullWidth
+                type="number"
+                slotProps={{ htmlInput: { min: 0 } }}
+                value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
+                onChange={(event) =>
+                  updateScenario("resourceConfig", {
+                    ...scenario.resourceConfig,
+                    [key]: Number(event.target.value)
+                  })
+                }
+              />
+            </Grid>
+          ))}
+        </Grid>
+        <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Daily Salary (Fully Burdened Cost)</Typography>
+        <Grid container spacing={3}>
+          {[
+            ["technicianSalaryDaily", "Technician Salary"],
+            ["supportStaffSalaryDaily", "Support Staff Salary"],
+            ["radiologistSalaryDaily", "Radiologist Salary"]
+          ].map(([key, label]) => (
+            <Grid size={{ xs: 12, sm: 4 }} key={key}>
+              <TextField
+                label={label}
+                fullWidth
+                size="small"
                 type="number"
                 slotProps={{ htmlInput: { min: 0 } }}
                 value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
@@ -882,6 +984,7 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
               </Stack>
               <Paper elevation={0} variant="outlined" sx={{ p: 2 }}>
                 <HourlyDemandChart
+                  key={`demand-chart-${scenario.demandProfile.hourlyDistribution.reduce((a, b) => a + b, 0).toFixed(4)}`}
                   values={scenario.demandProfile.hourlyDistribution}
                   onChange={(hourlyDistribution) =>
                     updateScenario("demandProfile", {
@@ -892,6 +995,46 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                 />
               </Paper>
             </Stack>
+
+            <Paper variant="outlined" sx={{ p: 2, mt: 3, borderColor: 'error.light', bgcolor: 'error.lighter' }}>
+              <Typography variant="subtitle2" color="error.main" sx={{ mb: 2 }}>Trauma & Emergencies</Typography>
+              <Grid container spacing={2}>
+                <Grid size={{ xs: 6 }}>
+                  <TextField
+                    label="Spike Probability (daily)"
+                    fullWidth
+                    size="small"
+                    type="number"
+                    slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
+                    value={scenario.demandProfile.traumaSpikeProbability}
+                    onChange={(event) =>
+                      updateScenario("demandProfile", {
+                        ...scenario.demandProfile,
+                        traumaSpikeProbability: Number(event.target.value)
+                      })
+                    }
+                  />
+                </Grid>
+                <Grid size={{ xs: 6 }}>
+                  <TextField
+                    label="Demand Multiplier"
+                    fullWidth
+                    size="small"
+                    type="number"
+                    slotProps={{ htmlInput: { min: 1, step: 0.1 } }}
+                    value={scenario.demandProfile.traumaSpikeMultiplier}
+                    onChange={(event) =>
+                      updateScenario("demandProfile", {
+                        ...scenario.demandProfile,
+                        traumaSpikeMultiplier: Number(event.target.value)
+                      })
+                    }
+                    helperText="On spike days, volume is multiplied."
+                  />
+                </Grid>
+              </Grid>
+            </Paper>
+
           </Grid>
           <Grid size={{ xs: 12, md: 6 }}>
             <Stack spacing={2}>
@@ -1001,6 +1144,20 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
                       itemIndex === index ? { ...item, charge: Number(event.target.value) } : item
                     ))
                   }
+                />
+                <TextField
+                  label="Consumable Cost"
+                  fullWidth
+                  size="small"
+                  type="number"
+                  slotProps={{ htmlInput: { min: 0 } }}
+                  value={service.consumableCost}
+                  onChange={(event) =>
+                    updateScenario("serviceConfigs", scenario.serviceConfigs.map((item, itemIndex) =>
+                      itemIndex === index ? { ...item, consumableCost: Number(event.target.value) } : item
+                    ))
+                  }
+                  helperText="Fixed cost incurred per scan (e.g. contrast, supplies)."
                 />
                 <TextField
                   label="Exam duration minutes"
