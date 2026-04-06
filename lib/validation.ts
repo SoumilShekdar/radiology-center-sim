@@ -55,11 +55,21 @@ export const scenarioSchema = z.object({
     changingRooms: z.number().int().min(0),
     technicians: z.number().int().min(1),
     supportStaff: z.number().int().min(1),
-    radiologists: z.number().int().min(1)
+    radiologists: z.number().int().min(1),
+    technicianSalaryDaily: z.number().nonnegative(),
+    radiologistSalaryDaily: z.number().nonnegative(),
+    supportStaffSalaryDaily: z.number().nonnegative(),
+    machineCostModel: z.enum(["LEASED", "OWNED"]),
+    xRayLeaseCostDaily: z.number().nonnegative(),
+    ctLeaseCostDaily: z.number().nonnegative(),
+    mriLeaseCostDaily: z.number().nonnegative(),
+    portableXRayLeaseCostDaily: z.number().nonnegative(),
+    ultrasoundLeaseCostDaily: z.number().nonnegative()
   }),
   serviceConfigs: z.array(z.object({
     modality: z.enum(MODALITIES),
     charge: z.number().nonnegative(),
+    consumableCost: z.number().nonnegative(),
     examDurationMinutes: z.number().int().min(5),
     prepDurationMinutes: z.number().int().min(0),
     cleanupMinutes: z.number().int().min(0),
@@ -75,6 +85,8 @@ export const scenarioSchema = z.object({
     noShowRate: boundedPercent,
     unexpectedLeaveRate: boundedPercent,
     repeatScanRate: boundedPercent,
+    traumaSpikeProbability: z.number().min(0).max(1),
+    traumaSpikeMultiplier: z.number().min(1),
     resultCommunicationMinutes: z.number().int().min(0)
   }),
   appointmentPolicy: z.object({

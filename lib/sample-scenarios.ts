@@ -27,11 +27,11 @@ const dayMultiplier = [0.45, 1, 1.05, 1.05, 1, 0.95, 0.7];
 
 function commonServiceConfigs() {
   return [
-    { modality: "XRAY", charge: 110, examDurationMinutes: 15, prepDurationMinutes: 8, cleanupMinutes: 4, reportingMinutes: 10 },
-    { modality: "CT", charge: 420, examDurationMinutes: 30, prepDurationMinutes: 15, cleanupMinutes: 8, reportingMinutes: 18 },
-    { modality: "MRI", charge: 900, examDurationMinutes: 50, prepDurationMinutes: 20, cleanupMinutes: 10, reportingMinutes: 25 },
-    { modality: "PORTABLE_XRAY", charge: 180, examDurationMinutes: 20, prepDurationMinutes: 5, cleanupMinutes: 5, reportingMinutes: 12 },
-    { modality: "ULTRASOUND", charge: 280, examDurationMinutes: 25, prepDurationMinutes: 10, cleanupMinutes: 5, reportingMinutes: 14 }
+    { modality: "XRAY", charge: 110, consumableCost: 8, examDurationMinutes: 15, prepDurationMinutes: 8, cleanupMinutes: 4, reportingMinutes: 10 },
+    { modality: "CT", charge: 420, consumableCost: 45, examDurationMinutes: 30, prepDurationMinutes: 15, cleanupMinutes: 8, reportingMinutes: 18 },
+    { modality: "MRI", charge: 900, consumableCost: 25, examDurationMinutes: 50, prepDurationMinutes: 20, cleanupMinutes: 10, reportingMinutes: 25 },
+    { modality: "PORTABLE_XRAY", charge: 180, consumableCost: 12, examDurationMinutes: 20, prepDurationMinutes: 5, cleanupMinutes: 5, reportingMinutes: 12 },
+    { modality: "ULTRASOUND", charge: 280, consumableCost: 15, examDurationMinutes: 25, prepDurationMinutes: 10, cleanupMinutes: 5, reportingMinutes: 14 }
   ] as ScenarioInput["serviceConfigs"];
 }
 
@@ -113,7 +113,16 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       changingRooms: 2,
       technicians: 4,
       supportStaff: 3,
-      radiologists: 2
+      radiologists: 2,
+      technicianSalaryDaily: 400,
+      radiologistSalaryDaily: 1500,
+      supportStaffSalaryDaily: 300,
+      machineCostModel: "LEASED" as const,
+      xRayLeaseCostDaily: 150,
+      ctLeaseCostDaily: 800,
+      mriLeaseCostDaily: 1500,
+      portableXRayLeaseCostDaily: 100,
+      ultrasoundLeaseCostDaily: 250
     },
     workflowConfig: buildWorkflowConfig(4, 2),
     serviceConfigs: commonServiceConfigs(),
@@ -127,6 +136,8 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       noShowRate: 0.05,
       unexpectedLeaveRate: 0.015,
       repeatScanRate: 0.02,
+      traumaSpikeProbability: 0.05,
+      traumaSpikeMultiplier: 2.0,
       resultCommunicationMinutes: 12
     },
     appointmentPolicy: {
@@ -165,7 +176,16 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       changingRooms: 4,
       technicians: 9,
       supportStaff: 6,
-      radiologists: 4
+      radiologists: 4,
+      technicianSalaryDaily: 400,
+      radiologistSalaryDaily: 1500,
+      supportStaffSalaryDaily: 300,
+      machineCostModel: "LEASED" as const,
+      xRayLeaseCostDaily: 150,
+      ctLeaseCostDaily: 800,
+      mriLeaseCostDaily: 1500,
+      portableXRayLeaseCostDaily: 100,
+      ultrasoundLeaseCostDaily: 250
     },
     workflowConfig: buildWorkflowConfig(8, 4),
     serviceConfigs: commonServiceConfigs().map((item) =>
@@ -181,6 +201,8 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       noShowRate: 0.04,
       unexpectedLeaveRate: 0.012,
       repeatScanRate: 0.025,
+      traumaSpikeProbability: 0.08,
+      traumaSpikeMultiplier: 2.0,
       resultCommunicationMinutes: 10
     },
     appointmentPolicy: {
@@ -219,7 +241,16 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       changingRooms: 8,
       technicians: 18,
       supportStaff: 10,
-      radiologists: 8
+      radiologists: 8,
+      technicianSalaryDaily: 400,
+      radiologistSalaryDaily: 1500,
+      supportStaffSalaryDaily: 300,
+      machineCostModel: "LEASED" as const,
+      xRayLeaseCostDaily: 150,
+      ctLeaseCostDaily: 800,
+      mriLeaseCostDaily: 1500,
+      portableXRayLeaseCostDaily: 100,
+      ultrasoundLeaseCostDaily: 250
     },
     workflowConfig: buildWorkflowConfig(14, 8),
     serviceConfigs: commonServiceConfigs().map((item) =>
@@ -239,6 +270,8 @@ export const SAMPLE_SCENARIOS: ScenarioInput[] = [
       noShowRate: 0.03,
       unexpectedLeaveRate: 0.018,
       repeatScanRate: 0.03,
+      traumaSpikeProbability: 0.12,
+      traumaSpikeMultiplier: 2.2,
       resultCommunicationMinutes: 9
     },
     appointmentPolicy: {

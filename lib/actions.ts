@@ -44,6 +44,11 @@ async function persistRunResult(runId: string, result: ReturnType<typeof runSimu
             completedPatients: snapshot.completedPatients,
             deferredPatients: snapshot.deferredPatients,
             revenue: snapshot.revenue,
+            profit: snapshot.profit ?? 0,
+            totalCost: snapshot.totalCost ?? 0,
+            consumableCost: snapshot.consumableCost ?? 0,
+            machineCost: snapshot.machineCost ?? 0,
+            staffCost: snapshot.staffCost ?? 0,
             averageWaitMinutes: snapshot.averageWaitMinutes,
             averageResultMinutes: snapshot.averageResultMinutes,
             p90WaitMinutes: snapshot.p90WaitMinutes,
@@ -96,9 +101,8 @@ function queueSimulationProcessing(params: {
           }
         });
       } finally {
-        revalidatePath("/");
-        revalidatePath(`/runs/${params.runId}`);
-        revalidatePath(`/scenarios/${params.scenarioId}`);
+        // In Next.js 15, revalidatePath cannot be used in background timeouts 
+        // that might outlive the render/action cycle.
       }
     })();
   }, 0);

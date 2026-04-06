@@ -52,6 +52,10 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     possibleRevenue: number;
     maximumRevenue: number;
     actualRevenue: number;
+    totalProfit: number;
+    consumableCost: number;
+    machineCost: number;
+    staffCost: number;
     lostRevenue: number;
     lostRevenueDueToWait: number;
     lostRevenueDueToResult: number;
@@ -99,6 +103,10 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
 
     const throughputFallback = modalitySnapshots.reduce((sum, snapshot) => sum + snapshot.throughput, 0);
     const revenueFallback = modalitySnapshots.reduce((sum, snapshot) => sum + snapshot.revenue, 0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const profitFallback = modalitySnapshots.reduce((sum, snapshot) => sum + ((snapshot as any).profit || 0), 0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const totalCostFallback = modalitySnapshots.reduce((sum, snapshot) => sum + ((snapshot as any).totalCost || 0), 0);
     const waitFallback =
       modalitySnapshots.length === 0 ? 0 : modalitySnapshots.reduce((sum, snapshot) => sum + snapshot.averageWaitMinutes, 0) / modalitySnapshots.length;
     const machineUtilFallback =
@@ -109,6 +117,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       label,
       throughput: throughputMetric?.metricValue ?? throughputFallback,
       revenue: revenueMetric?.metricValue ?? revenueFallback,
+      profit: profitFallback,
+      totalCost: totalCostFallback,
       averageWaitMinutes: avgWaitMetric?.metricValue ?? waitFallback,
       machineUtilization: machineUtilMetric?.metricValue ?? machineUtilFallback
     };
@@ -183,6 +193,19 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           )}
 
           <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Net Profit" value={formatCurrency(summary.totalProfit ?? 0, currency)} subtitle={`Margin ${formatPercent(summary.actualRevenue ? ((summary.totalProfit ?? 0) / summary.actualRevenue) * 100 : 0)}`} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Consumables" value={formatCurrency(summary.consumableCost ?? 0, currency)} subtitle="Variable scan costs" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Machine Lease" value={formatCurrency(summary.machineCost ?? 0, currency)} subtitle="Fixed setup costs" />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Staff Expenses" value={formatCurrency(summary.staffCost ?? 0, currency)} subtitle="Total payroll costs" />
+            </Grid>
+
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
               <MetricCard title="Run Seed" value={summary.mode === "MONTE_CARLO" ? `${summary.seedStart}-${summary.seedEnd}` : run.seed} subtitle={summary.mode === "MONTE_CARLO" ? "Seed range used for sensitivity run." : "Reuse this seed to reproduce."} />
             </Grid>
@@ -294,6 +317,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                       <TableCell>Modality</TableCell>
                       <TableCell align="right">Throughput</TableCell>
                       <TableCell align="right">Revenue</TableCell>
+                      <TableCell align="right">Profit</TableCell>
+                      <TableCell align="right">Margin</TableCell>
                       <TableCell align="right">Avg wait</TableCell>
                       <TableCell align="right">Machine util</TableCell>
                     </TableRow>
@@ -301,11 +326,16 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                   <TableBody>
                     {Object.entries(MODALITY_LABELS).map(([modality, label]) => {
                       const row = modalityRows.find((item) => item.modality === modality);
+                      const rowProfit = row?.profit ?? 0;
+                      const rowRevenue = row?.revenue ?? 0;
+                      const rowMargin = rowRevenue > 0 ? (rowProfit / rowRevenue) * 100 : 0;
                       return (
                         <TableRow key={modality} hover>
                           <TableCell component="th" scope="row">{label}</TableCell>
                           <TableCell align="right">{Math.round(row?.throughput ?? 0)}</TableCell>
-                          <TableCell align="right">{formatCurrency(row?.revenue ?? 0, currency)}</TableCell>
+                          <TableCell align="right">{formatCurrency(rowRevenue, currency)}</TableCell>
+                          <TableCell align="right">{formatCurrency(rowProfit, currency)}</TableCell>
+                          <TableCell align="right">{formatPercent(rowMargin)}</TableCell>
                           <TableCell align="right">{formatMinutes(row?.averageWaitMinutes ?? 0)}</TableCell>
                           <TableCell align="right">{formatPercent(row?.machineUtilization ?? 0)}</TableCell>
                         </TableRow>
@@ -328,6 +358,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                       <TableCell align="right">Completed</TableCell>
                       <TableCell align="right">Deferred</TableCell>
                       <TableCell align="right">Revenue</TableCell>
+                      <TableCell align="right">Profit</TableCell>
                       <TableCell align="right">P90 wait</TableCell>
                     </TableRow>
                   </TableHead>
@@ -338,6 +369,8 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                         <TableCell align="right">{snapshot.completedPatients}</TableCell>
                         <TableCell align="right">{snapshot.deferredPatients}</TableCell>
                         <TableCell align="right">{formatCurrency(snapshot.revenue, currency)}</TableCell>
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        <TableCell align="right">{formatCurrency((snapshot as any).profit ?? 0, currency)}</TableCell>
                         <TableCell align="right">{formatMinutes(snapshot.p90WaitMinutes)}</TableCell>
                       </TableRow>
                     ))}

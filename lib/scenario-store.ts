@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { prisma } from "@/lib/prisma";
 import type { ScenarioInput } from "@/lib/types";
 
@@ -122,11 +123,21 @@ export async function getScenario(id: string): Promise<ScenarioInput> {
       changingRooms: scenario.resourceConfig?.changingRooms ?? 0,
       technicians: scenario.resourceConfig?.technicians ?? 1,
       supportStaff: scenario.resourceConfig?.supportStaff ?? 1,
-      radiologists: scenario.resourceConfig?.radiologists ?? 1
+      radiologists: scenario.resourceConfig?.radiologists ?? 1,
+      technicianSalaryDaily: (scenario.resourceConfig as any)?.technicianSalaryDaily ?? 0,
+      radiologistSalaryDaily: (scenario.resourceConfig as any)?.radiologistSalaryDaily ?? 0,
+      supportStaffSalaryDaily: (scenario.resourceConfig as any)?.supportStaffSalaryDaily ?? 0,
+      machineCostModel: ((scenario.resourceConfig as any)?.machineCostModel ?? "LEASED") as "LEASED" | "OWNED",
+      xRayLeaseCostDaily: (scenario.resourceConfig as any)?.xRayLeaseCostDaily ?? 0,
+      ctLeaseCostDaily: (scenario.resourceConfig as any)?.ctLeaseCostDaily ?? 0,
+      mriLeaseCostDaily: (scenario.resourceConfig as any)?.mriLeaseCostDaily ?? 0,
+      portableXRayLeaseCostDaily: (scenario.resourceConfig as any)?.portableXRayLeaseCostDaily ?? 0,
+      ultrasoundLeaseCostDaily: (scenario.resourceConfig as any)?.ultrasoundLeaseCostDaily ?? 0
     },
     serviceConfigs: scenario.services.map((service) => ({
       modality: service.modality as ScenarioInput["serviceConfigs"][number]["modality"],
       charge: service.charge,
+      consumableCost: (service as any).consumableCost ?? 0,
       examDurationMinutes: service.examDurationMinutes,
       prepDurationMinutes: service.prepDurationMinutes,
       cleanupMinutes: service.cleanupMinutes,
@@ -142,6 +153,8 @@ export async function getScenario(id: string): Promise<ScenarioInput> {
       noShowRate: scenario.demandProfile?.noShowRate ?? 0,
       unexpectedLeaveRate: scenario.demandProfile?.unexpectedLeaveRate ?? 0,
       repeatScanRate: scenario.demandProfile?.repeatScanRate ?? 0,
+      traumaSpikeProbability: (scenario.demandProfile as any)?.traumaSpikeProbability ?? 0,
+      traumaSpikeMultiplier: (scenario.demandProfile as any)?.traumaSpikeMultiplier ?? 2.0,
       resultCommunicationMinutes: scenario.demandProfile?.resultCommunicationMinutes ?? 0
     },
     appointmentPolicy: (scenario.appointmentPolicy as ScenarioInput["appointmentPolicy"]) ?? {
