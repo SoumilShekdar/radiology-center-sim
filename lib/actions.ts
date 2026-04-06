@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { DEFAULT_SCENARIO, SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
 import { duplicateScenario, getScenario, upsertScenario } from "@/lib/scenario-store";
 import { runMonteCarlo, runSimulation } from "@/lib/simulator";
+import { runOptimizer } from "@/lib/optimizer";
+import { getOptimizerAdvice } from "@/lib/llm-advisor";
 import type { ScenarioInput } from "@/lib/types";
 import { scenarioSchema } from "@/lib/validation";
 
@@ -214,4 +216,107 @@ export async function runMonteCarloAction(formData: FormData) {
   revalidatePath(`/runs/${run.id}`);
   revalidatePath(`/scenarios/${scenarioId}`);
   return { runId: run.id };
+}
+
+export async function runOptimizerAction(formData: FormData) {
+  const scenarioId = formData.get("scenarioId");
+  const horizonDays = formData.get("horizonDays");
+  const seed = formData.get("seed");
+  const maxWaitMinutes = formData.get("maxWaitMinutes");
+  const enabledKnobsRaw = formData.get("enabledKnobs");
+
+  if (
+    typeof scenarioId !== "string" ||
+    typeof horizonDays !== "string" ||
+    typeof seed !== "string" ||
+    typeof maxWaitMinutes !== "string"
+  ) {
+    throw new Error("scenarioId, horizonDays, seed, and maxWaitMinutes are required.");
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const enabledKnobs: any[] = typeof enabledKnobsRaw === "string"
+    ? JSON.parse(enabledKnobsRaw)
+    : null;
+
+  // Use cuid-style id manually since we bypass the Prisma client
+  const runId = `opt_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const constraint = JSON.stringify({ maxWaitMinutes: Number(maxWaitMinutes), enabledKnobs });
+
+  await prisma.$executeRaw`
+    INSERT INTO "OptimiserRun" ("id", "scenarioId", "status", "horizonDays", "seed", "constraint", "startedAt")
+    VALUES (${runId}, ${scenarioId}, 'QUEUED', ${Number(horizonDays)}, ${Number(seed)}, ${constraint}::jsonb, NOW())
+  `;
+
+  setTimeout(() => {
+    void (async () => {
+      try {
+        await prisma.$executeRaw`
+          UPDATE "OptimiserRun" SET "status" = 'RUNNING' WHERE "id" = ${runId}
+        `;
+
+        const scenario = await getScenario(scenarioId);
+        const baselineResult = runSimulation(scenario, Number(horizonDays), Number(seed));
+        const optimizerConstraint = { maxWaitMinutes: Number(maxWaitMinutes) };
+
+        const candidates = runOptimizer(scenario, Number(horizonDays), Number(seed), optimizerConstraint, 220, enabledKnobs ?? undefined);
+
+        const advice = await getOptimizerAdvice({
+          scenarioName: scenario.name,
+          currency: scenario.currency,
+          constraint: optimizerConstraint,
+          baseline: baselineResult.summary,
+          topCandidates: candidates,
+          baseline_config: scenario.resourceConfig,
+        });
+
+        const results = JSON.stringify({
+          baseline: baselineResult.summary,
+          candidates: candidates.map((c) => ({
+            delta: c.delta,
+            resourceConfig: c.resourceConfig,
+            summary: c.summary,
+            score: c.score,
+            feasible: c.feasible,
+          })),
+          advice,
+        });
+
+        await prisma.$executeRaw`
+          UPDATE "OptimiserRun"
+          SET "status" = 'COMPLETED', "completedAt" = NOW(), "results" = ${results}::jsonb
+          WHERE "id" = ${runId}
+        `;
+      } catch (error) {
+        const errResults = JSON.stringify({ error: error instanceof Error ? error.message : "Optimiser failed." });
+        await prisma.$executeRaw`
+          UPDATE "OptimiserRun"
+          SET "status" = 'FAILED', "completedAt" = NOW(), "results" = ${errResults}::jsonb
+          WHERE "id" = ${runId}
+        `;
+      }
+    })();
+  }, 0);
+
+  return { runId };
+}
+
+export async function listOptimizerRunsAction(scenarioId: string) {
+  const rows = await prisma.$queryRaw<Array<{
+    id: string;
+    status: string;
+    horizonDays: number;
+    seed: number;
+    constraint: { maxWaitMinutes: number };
+    startedAt: Date;
+    completedAt: Date | null;
+    results: Record<string, unknown> | null;
+  }>>`
+    SELECT "id", "status", "horizonDays", "seed", "constraint", "startedAt", "completedAt", "results"
+    FROM "OptimiserRun"
+    WHERE "scenarioId" = ${scenarioId}
+    ORDER BY "startedAt" DESC
+    LIMIT 10
+  `;
+  return rows;
 }

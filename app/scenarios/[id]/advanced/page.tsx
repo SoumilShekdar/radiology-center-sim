@@ -8,6 +8,8 @@ import Typography from "@mui/material/Typography";
 import Card from "@mui/material/Card";
 import Stack from "@mui/material/Stack";
 import Button from "@mui/material/Button";
+import Box from "@mui/material/Box";
+import { OptimizerPanel } from "@/components/optimizer-panel";
 
 export default async function ScenarioAdvancedPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -33,6 +35,13 @@ export default async function ScenarioAdvancedPage({ params }: { params: Promise
           </form>
         </Stack>
       </Card>
+      
+      {/* Goal-Seeking Optimiser — high visibility whitespace */}
+      {scenario.id && (
+        <Box sx={{ mb: 4 }}>
+          <OptimizerPanel scenarioId={scenario.id} seedDefault={scenario.seedDefault} />
+        </Box>
+      )}
       
       <ScenarioEditor initialScenario={scenario} mode="edit" viewMode="advanced" />
     </Container>
