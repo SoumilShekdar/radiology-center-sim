@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { RunStatusPoller } from "@/components/run-status-poller";
+import { RunCompareSelector } from "@/components/run-compare-selector";
 import { SimpleLineChart } from "@/components/simple-chart";
 import { MODALITY_LABELS } from "@/lib/constants";
 import { formatCurrency } from "@/lib/currency";
@@ -44,6 +45,12 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         orderBy: [{ dayIndex: "asc" }, { modality: "asc" }]
       }
     }
+  });
+
+  const otherRuns = await prisma.simulationRun.findMany({
+    where: { scenarioId: run.scenarioId, id: { not: run.id }, status: 'COMPLETED' },
+    orderBy: { startedAt: 'desc' },
+    take: 5
   });
 
   const summary = (run.summary ?? {}) as {
@@ -149,6 +156,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           <Button component={Link} href={`/scenarios/${run.scenarioId}`} variant="outlined">
             Back to scenario
           </Button>
+          <RunCompareSelector baseRunId={run.id} otherRuns={otherRuns} />
           <Button component={Link} href="/" variant="contained">
             Home
           </Button>
