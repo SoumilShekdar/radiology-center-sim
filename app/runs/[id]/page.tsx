@@ -1,10 +1,13 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { RunStatusPoller } from "@/components/run-status-poller";
 import { RunCompareSelector } from "@/components/run-compare-selector";
-import { SimpleLineChart } from "@/components/simple-chart";
+import { InteractiveCharts } from "@/components/interactive-charts";
+import { InsightCard } from "@/components/insight-card";
 import { MODALITY_LABELS } from "@/lib/constants";
 import { formatCurrency } from "@/lib/currency";
 import { prisma } from "@/lib/prisma";
+import { getScenario } from "@/lib/scenario-store";
 
 import Container from "@mui/material/Container";
 import Grid from "@mui/material/Grid";
@@ -47,10 +50,15 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     }
   });
 
+  const scenarioInput = await getScenario(run.scenarioId);
+
   const otherRuns = await prisma.simulationRun.findMany({
-    where: { scenarioId: run.scenarioId, id: { not: run.id }, status: 'COMPLETED' },
+    where: { id: { not: run.id }, status: 'COMPLETED' },
     orderBy: { startedAt: 'desc' },
-    take: 5
+    take: 10,
+    include: {
+      scenario: { select: { name: true } }
+    }
   });
 
   const summary = (run.summary ?? {}) as {
@@ -181,6 +189,9 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
             <Typography variant="overline" color="secondary" gutterBottom>Bottleneck signal</Typography>
             <Typography variant="h3" sx={{ mt: 1, mb: 1 }}>{summary.bottleneck}</Typography>
             <Typography variant="body2" color="text.secondary">Most common delaying or blocking resource observed in the run.</Typography>
+            <Suspense fallback={<Typography variant="body2" sx={{ mt: 2, color: 'text.secondary' }}>Loading AI insights...</Typography>}>
+              <InsightCard scenarioName={run.scenario.name} currency={currency} summary={summary} />
+            </Suspense>
           </Card>
 
           {summary.mode === "MONTE_CARLO" && (
@@ -279,39 +290,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
             </Grid>
           </Grid>
 
-          <Grid container spacing={4}>
-            <Grid size={{ xs: 12, md: 6 }}>
-              <Box mb={2}>
-                <Typography variant="h2" gutterBottom>Daily revenue</Typography>
-              </Box>
-              <Card elevation={0} variant="outlined" sx={{ p: 3, pt: 4, height: 300 }}>
-                <SimpleLineChart
-                  title="Revenue by day"
-                  valueFormatter={(value) => formatCurrency(value, currency)}
-                  points={allSnapshots.map((snapshot) => ({
-                    label: `D${snapshot.dayIndex + 1}`,
-                    value: snapshot.revenue
-                  }))}
-                />
-              </Card>
-            </Grid>
-            <Grid size={{ xs: 12, md: 6 }}>
-              <Box mb={2}>
-                <Typography variant="h2" gutterBottom>Daily average wait</Typography>
-              </Box>
-              <Card elevation={0} variant="outlined" sx={{ p: 3, pt: 4, height: 300 }}>
-                <SimpleLineChart
-                  title="Wait by day"
-                  color="#356c5c"
-                  valueFormatter={(value) => `${Math.round(value)}m`}
-                  points={allSnapshots.map((snapshot) => ({
-                    label: `D${snapshot.dayIndex + 1}`,
-                    value: snapshot.averageWaitMinutes
-                  }))}
-                />
-              </Card>
-            </Grid>
-          </Grid>
+          <InteractiveCharts baseScenario={scenarioInput} allSnapshots={allSnapshots} currency={currency} />
 
           <Grid container spacing={4}>
             <Grid size={{ xs: 12, md: 6 }}>

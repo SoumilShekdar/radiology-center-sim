@@ -22,8 +22,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { DAY_NAMES, HORIZON_OPTIONS, MODALITY_LABELS } from "@/lib/constants";
 import { runMonteCarloAction, runSimulationAction, saveScenarioAction } from "@/lib/actions";
-import { SUPPORTED_CURRENCIES } from "@/lib/currency";
-import { DEFAULT_SCENARIO, SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
+import { GuidedScenarioEditor } from "@/components/guided-scenario-editor";
+import { DEFAULT_SCENARIO } from "@/lib/sample-scenarios";
 import type { ScenarioInput } from "@/lib/types";
 
 
@@ -92,36 +92,6 @@ function coverageFromCounts(counts: number[], total: number) {
   }));
 }
 
-function syncRoomConfigs(current: ScenarioInput["workflowConfig"]["roomConfigs"], nextCount: number) {
-  const trimmed = current.slice(0, nextCount);
-  if (trimmed.length === nextCount) {
-    return trimmed;
-  }
-
-  const additions = Array.from({ length: nextCount - trimmed.length }, (_, index) => ({
-    id: `room-${trimmed.length + index + 1}`,
-    name: `Room ${trimmed.length + index + 1}`,
-    supportedModalities: ["XRAY", "CT", "MRI", "ULTRASOUND"] as ScenarioInput["workflowConfig"]["roomConfigs"][number]["supportedModalities"],
-    dedicatedModality: "NONE" as const
-  }));
-
-  return [...trimmed, ...additions];
-}
-
-function syncChangingRoomConfigs(current: ScenarioInput["workflowConfig"]["changingRoomConfigs"], nextCount: number) {
-  const trimmed = current.slice(0, nextCount);
-  if (trimmed.length === nextCount) {
-    return trimmed;
-  }
-
-  const additions = Array.from({ length: nextCount - trimmed.length }, (_, index) => ({
-    id: `changing-room-${trimmed.length + index + 1}`,
-    name: `Changing Room ${trimmed.length + index + 1}`,
-    gender: "UNISEX" as const
-  }));
-
-  return [...trimmed, ...additions];
-}
 
 function HourlyDemandChart({
   values,
@@ -398,315 +368,6 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
     router.push(`/scenarios/${scenario.id}`);
   }, [mode, router, scenario.id]);
 
-  const basicSections = useMemo(() => (
-    <>
-      <section className="panel stack">
-        <Box>
-          <Typography variant="overline" color="primary">Quick Start</Typography>
-          <Typography variant="h5" sx={{ mt: 1, mb: 1, fontWeight: 600 }}>Build a preliminary model before tuning everything</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Pick a preset, auto-fill staffing, and generate an expected demand curve. Demand and service mix are used as probabilistic weights, not fixed schedules.
-          </Typography>
-        </Box>
-        <Grid container spacing={2}>
-          {SAMPLE_SCENARIOS.map((preset) => (
-            <Grid size={{ xs: 12, sm: 6, lg: 3 }} key={preset.name}>
-              <Button
-                variant="outlined"
-                color="secondary"
-                fullWidth
-                onClick={() => applyScenarioPreset(preset)}
-                sx={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  textAlign: "left",
-                  py: 1.5,
-                  px: 2,
-                  gap: 0.5,
-                  minHeight: 120,
-                  lineHeight: 1.4,
-                  borderColor: "divider",
-                  "&:hover": { borderColor: "primary.main", background: "rgba(37,99,235,0.04)" }
-                }}
-              >
-                <Typography variant="subtitle2" component="strong" sx={{ fontWeight: 600 }}>{preset.name}</Typography>
-                <Typography variant="caption" sx={{ color: "text.secondary", whiteSpace: "normal" }}>{preset.description}</Typography>
-              </Button>
-            </Grid>
-          ))}
-        </Grid>
-        <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-          <Button variant="outlined" color="secondary" onClick={applyEightHourShiftPreset}>
-            Auto-fill 8h / 6d shifts
-          </Button>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={() =>
-              updateScenario("demandProfile", {
-                ...scenario.demandProfile,
-                hourlyDistribution: buildExpectedHourlyDistribution(
-                  openWindow.openHour,
-                  openWindow.closeHour,
-                  demandPeakHour,
-                  Math.max(2, Math.round((openWindow.closeHour - openWindow.openHour) / 4))
-                )
-              })
-            }
-          >
-            Use expected demand curve
-          </Button>
-          <Button
-            variant="outlined"
-            color="secondary"
-            onClick={() =>
-              updateScenario("serviceMix", scenario.serviceMix.map((item, index, list) => ({
-                ...item,
-                weight: Number((1 / list.length).toFixed(4))
-              })))
-            }
-          >
-            Even service mix
-          </Button>
-        </Stack>
-      </section>
-
-      <SectionBlock
-        kicker="Section 1"
-        title="Scenario Description"
-        description="Name the scenario, choose a seed, currency, downtime rate, and capture the planning context in plain language."
-        defaultOpen
-      >
-        <Grid container spacing={3}>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <TextField
-              label="Scenario name"
-              fullWidth
-              value={scenario.name}
-              onChange={(event) => updateScenario("name", event.target.value)}
-            />
-          </Grid>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <FormControl fullWidth>
-              <InputLabel>Currency</InputLabel>
-              <Select
-                value={scenario.currency}
-                label="Currency"
-                onChange={(event) => updateScenario("currency", event.target.value)}
-              >
-                {SUPPORTED_CURRENCIES.map((currency) => (
-                  <MenuItem key={currency} value={currency}>
-                    {currency}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <TextField
-              label="Default seed"
-              fullWidth
-              type="number"
-              value={scenario.seedDefault}
-              onChange={(event) => updateScenario("seedDefault", Number(event.target.value))}
-            />
-          </Grid>
-          <Grid size={{ xs: 12, md: 6 }}>
-            <TextField
-              label="Equipment downtime rate"
-              fullWidth
-              type="number"
-              slotProps={{
-                htmlInput: {
-                  min: 0,
-                  max: 1,
-                  step: 0.01
-                }
-              }}
-              value={scenario.downtimeRate}
-              onChange={(event) => updateScenario("downtimeRate", Number(event.target.value))}
-            />
-          </Grid>
-          <Grid size={{ xs: 12 }}>
-            <TextField
-              label="Description"
-              fullWidth
-              multiline
-              rows={3}
-              value={scenario.description}
-              onChange={(event) => updateScenario("description", event.target.value)}
-            />
-          </Grid>
-        </Grid>
-      </SectionBlock>
-
-      <SectionBlock
-        kicker="Section 2"
-        title="Infrastructure Setup & Costs"
-        description="Configure machine counts, physical spaces, and the equipment cost model."
-        defaultOpen
-      >
-        <Paper elevation={0} variant="outlined" sx={{ p: 2, bgcolor: 'rgba(37,99,235,0.04)', color: 'text.secondary', mb: 3 }}>
-          <Typography variant="body2">
-            Portable X-Ray is a special X-Ray path for immobile patients. Lease costs are fixed daily costs applied independently of utilization.
-          </Typography>
-        </Paper>
-        <Stack spacing={3}>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, md: 6 }}>
-              <FormControl fullWidth size="small">
-                <InputLabel>Machine Cost Model</InputLabel>
-                <Select
-                  value={scenario.resourceConfig.machineCostModel}
-                  label="Machine Cost Model"
-                  onChange={(event) =>
-                    updateScenario("resourceConfig", {
-                      ...scenario.resourceConfig,
-                      machineCostModel: event.target.value as "LEASED" | "OWNED"
-                    })
-                  }
-                >
-                  <MenuItem value="LEASED">Daily Leased</MenuItem>
-                  <MenuItem value="OWNED">Owned (No daily cost)</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-          {scenario.resourceConfig.machineCostModel === "LEASED" && (
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Typography variant="subtitle2" sx={{ mb: 2 }}>Daily Lease Costs per Modality Unit</Typography>
-              <Grid container spacing={2}>
-                {[
-                  ["xRayLeaseCostDaily", "X-Ray Lease/Day"],
-                  ["ctLeaseCostDaily", "CT Lease/Day"],
-                  ["mriLeaseCostDaily", "MRI Lease/Day"],
-                  ["portableXRayLeaseCostDaily", "Portable X-Ray Lease/Day"],
-                  ["ultrasoundLeaseCostDaily", "Ultrasound Lease/Day"]
-                ].map(([key, label]) => (
-                  <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key}>
-                    <TextField
-                      label={label}
-                      fullWidth
-                      size="small"
-                      type="number"
-                      slotProps={{ htmlInput: { min: 0 } }}
-                      value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
-                      onChange={(event) =>
-                        updateScenario("resourceConfig", {
-                          ...scenario.resourceConfig,
-                          [key]: Number(event.target.value)
-                        })
-                      }
-                    />
-                  </Grid>
-                ))}
-              </Grid>
-            </Paper>
-          )}
-          <Typography variant="subtitle2">Physical Infrastructure Counts</Typography>
-          <Grid container spacing={3}>
-            {[
-              ["xRayMachines", "X-Ray machines"],
-              ["ctMachines", "CT scanners"],
-              ["mriMachines", "MRI scanners"],
-              ["portableXRayMachines", "Portable X-Ray machines"],
-              ["ultrasoundMachines", "Ultrasounds"],
-              ["rooms", "Procedure rooms"],
-              ["changingRooms", "Changing rooms"]
-            ].map(([key, label]) => (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key}>
-              <TextField
-                label={label}
-                fullWidth
-                type="number"
-                slotProps={{ htmlInput: { min: 0 } }}
-                value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
-                onChange={(event) => {
-                  const nextValue = Number(event.target.value);
-                  updateScenario("resourceConfig", {
-                    ...scenario.resourceConfig,
-                    [key]: nextValue
-                  });
-
-                  if (key === "rooms") {
-                    updateScenario("workflowConfig", {
-                      ...scenario.workflowConfig,
-                      roomConfigs: syncRoomConfigs(scenario.workflowConfig.roomConfigs, nextValue)
-                    });
-                  }
-
-                  if (key === "changingRooms") {
-                    updateScenario("workflowConfig", {
-                      ...scenario.workflowConfig,
-                      changingRoomConfigs: syncChangingRoomConfigs(scenario.workflowConfig.changingRoomConfigs, nextValue)
-                    });
-                  }
-                }}
-              />
-            </Grid>
-          ))}
-        </Grid>
-        </Stack>
-      </SectionBlock>
-
-      <SectionBlock
-        kicker="Section 3"
-        title="Staff Setup"
-        description="Set total team size first. Hourly on-shift staffing is configured in Advanced Options."
-        defaultOpen
-      >
-        <Grid container spacing={3}>
-          {[
-            ["technicians", "Technicians"],
-            ["supportStaff", "Support staff"],
-            ["radiologists", "Radiologists"]
-          ].map(([key, label]) => (
-            <Grid size={{ xs: 12, sm: 4 }} key={key}>
-              <TextField
-                label={label}
-                fullWidth
-                type="number"
-                slotProps={{ htmlInput: { min: 0 } }}
-                value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
-                onChange={(event) =>
-                  updateScenario("resourceConfig", {
-                    ...scenario.resourceConfig,
-                    [key]: Number(event.target.value)
-                  })
-                }
-              />
-            </Grid>
-          ))}
-        </Grid>
-        <Typography variant="subtitle2" sx={{ mt: 3, mb: 1 }}>Daily Salary (Fully Burdened Cost)</Typography>
-        <Grid container spacing={3}>
-          {[
-            ["technicianSalaryDaily", "Technician Salary"],
-            ["supportStaffSalaryDaily", "Support Staff Salary"],
-            ["radiologistSalaryDaily", "Radiologist Salary"]
-          ].map(([key, label]) => (
-            <Grid size={{ xs: 12, sm: 4 }} key={key}>
-              <TextField
-                label={label}
-                fullWidth
-                size="small"
-                type="number"
-                slotProps={{ htmlInput: { min: 0 } }}
-                value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
-                onChange={(event) =>
-                  updateScenario("resourceConfig", {
-                    ...scenario.resourceConfig,
-                    [key]: Number(event.target.value)
-                  })
-                }
-              />
-            </Grid>
-          ))}
-        </Grid>
-      </SectionBlock>
-    </>
-  ), [scenario, openWindow, demandPeakHour, applyEightHourShiftPreset, applyScenarioPreset, updateScenario]);
 
   const advancedSections = useMemo(() => (
     <>
@@ -1460,6 +1121,85 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
           </Grid>
         </Grid>
       </SectionBlock>
+
+      <SectionBlock
+        kicker="Section 11"
+        title="Financial Fixed Costs"
+        description="Daily staffing and machine lease costs. These costs are scaled out over the full simulation horizon automatically."
+      >
+        <Stack spacing={4}>
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12 }}>
+              <Typography variant="overline" color="text.secondary">Staff Salaries (Daily per FTE)</Typography>
+            </Grid>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                label="Radiologist Daily Salary"
+                fullWidth size="small" type="number"
+                slotProps={{ htmlInput: { min: 0 } }}
+                value={scenario.resourceConfig.radiologistSalaryDaily}
+                onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, radiologistSalaryDaily: Number(e.target.value) })}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                label="Technician Daily Salary"
+                fullWidth size="small" type="number"
+                slotProps={{ htmlInput: { min: 0 } }}
+                value={scenario.resourceConfig.technicianSalaryDaily}
+                onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, technicianSalaryDaily: Number(e.target.value) })}
+              />
+            </Grid>
+            <Grid size={{ xs: 12, md: 4 }}>
+              <TextField
+                label="Support Staff Daily Salary"
+                fullWidth size="small" type="number"
+                slotProps={{ htmlInput: { min: 0 } }}
+                value={scenario.resourceConfig.supportStaffSalaryDaily}
+                onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, supportStaffSalaryDaily: Number(e.target.value) })}
+              />
+            </Grid>
+          </Grid>
+
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12 }}>
+              <Typography variant="overline" color="text.secondary">Machine Ownership</Typography>
+            </Grid>
+            <Grid size={{ xs: 12 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Machine Cost Model</InputLabel>
+                <Select
+                  value={scenario.resourceConfig.machineCostModel}
+                  label="Machine Cost Model"
+                  onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, machineCostModel: e.target.value as "LEASED" | "OWNED" })}
+                >
+                  <MenuItem value="OWNED">Fully Owned (No Daily Cost)</MenuItem>
+                  <MenuItem value="LEASED">Leased (Incurs Daily Cost)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            {scenario.resourceConfig.machineCostModel === "LEASED" && (
+              <>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  <TextField label="X-Ray Daily Lease" fullWidth size="small" type="number" value={scenario.resourceConfig.xRayLeaseCostDaily} onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, xRayLeaseCostDaily: Number(e.target.value) })} />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  <TextField label="CT Daily Lease" fullWidth size="small" type="number" value={scenario.resourceConfig.ctLeaseCostDaily} onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, ctLeaseCostDaily: Number(e.target.value) })} />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  <TextField label="MRI Daily Lease" fullWidth size="small" type="number" value={scenario.resourceConfig.mriLeaseCostDaily} onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, mriLeaseCostDaily: Number(e.target.value) })} />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  <TextField label="Ultrasound Daily Lease" fullWidth size="small" type="number" value={scenario.resourceConfig.ultrasoundLeaseCostDaily} onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, ultrasoundLeaseCostDaily: Number(e.target.value) })} />
+                </Grid>
+                <Grid size={{ xs: 12, sm: 6, md: 4 }}>
+                  <TextField label="Portable X-Ray Daily Lease" fullWidth size="small" type="number" value={scenario.resourceConfig.portableXRayLeaseCostDaily} onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, portableXRayLeaseCostDaily: Number(e.target.value) })} />
+                </Grid>
+              </>
+            )}
+          </Grid>
+        </Stack>
+      </SectionBlock>
     </>
   ), [scenario, openWindow, demandPeakHour, technicianSchedulePreview, supportSchedulePreview, radiologistSchedulePreview, applyEightHourShiftPreset, updateOnShiftCount, updateScenario]);
 
@@ -1480,7 +1220,22 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
         </Paper>
       ) : null}
       
-      {viewMode === "basic" ? basicSections : advancedSections}
+      {viewMode === "basic" ? (
+        <GuidedScenarioEditor
+          scenario={scenario}
+          updateScenario={updateScenario}
+          applyScenarioPreset={applyScenarioPreset}
+          applyEightHourShiftPreset={applyEightHourShiftPreset}
+          updateOnShiftCount={updateOnShiftCount}
+          goToAdvanced={goToAdvanced}
+          submitScenario={() => void submitScenario()}
+          isSaving={isSaving}
+          openWindow={openWindow}
+          demandPeakHour={demandPeakHour}
+        />
+      ) : (
+        advancedSections
+      )}
 
       <Paper variant="outlined" sx={{ p: 4, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <Box>

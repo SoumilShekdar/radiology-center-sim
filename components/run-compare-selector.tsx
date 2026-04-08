@@ -37,7 +37,7 @@ export function RunCompareSelector({ baseRunId, otherRuns }: { baseRunId: string
               router.push(`/scenarios/compare?base=${baseRunId}&variant=${other.id}`);
             }}
           >
-            Run on {new Intl.DateTimeFormat("en", { dateStyle: "short", timeStyle: "short" }).format(new Date(other.startedAt))} (Seed {other.seed})
+            {other.scenario?.name} (Seed {other.seed})
           </MenuItem>
         ))}
       </Menu>

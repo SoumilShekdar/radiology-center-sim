@@ -1283,11 +1283,11 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
     p50ResultMinutes: percentile(resultWaits, 0.5),
     p90ResultMinutes: percentile(resultWaits, 0.9),
     p95WaitMinutes: percentile(waits, 0.95),
-    machineUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.machineUtilization, 0) / horizonDays * 100,
-    technicianUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.technicianUtilization, 0) / horizonDays * 100,
-    radiologistUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.radiologistUtilization, 0) / horizonDays * 100,
-    roomUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.roomUtilization, 0) / horizonDays * 100,
-    changingRoomUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.changingRoomUtilization, 0) / horizonDays * 100,
+    machineUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.machineUtilization, 0) / horizonDays,
+    technicianUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.technicianUtilization, 0) / horizonDays,
+    radiologistUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.radiologistUtilization, 0) / horizonDays,
+    roomUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.roomUtilization, 0) / horizonDays,
+    changingRoomUtilization: snapshots.filter(s => s.modality === "ALL").reduce((sum, s) => sum + s.changingRoomUtilization, 0) / horizonDays,
     bottleneck: [...bottleneckSignals.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "None"
   };
 
@@ -1331,7 +1331,7 @@ export function runSimulation(scenario: ScenarioInput, horizonDays: number, seed
       {
         modality,
         metricName: "machineUtilization",
-        metricValue: modalitySnapshots.reduce((sum, s) => sum + s.machineUtilization, 0) / horizonDays * 100
+        metricValue: modalitySnapshots.reduce((sum, s) => sum + s.machineUtilization, 0) / horizonDays
       }
     );
   }
