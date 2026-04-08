@@ -23,8 +23,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 import { DAY_NAMES, HORIZON_OPTIONS, MODALITY_LABELS } from "@/lib/constants";
 import { runMonteCarloAction, runSimulationAction, saveScenarioAction } from "@/lib/actions";
 import { GuidedScenarioEditor } from "@/components/guided-scenario-editor";
-import { SUPPORTED_CURRENCIES } from "@/lib/currency";
-import { DEFAULT_SCENARIO, SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
+import { DEFAULT_SCENARIO } from "@/lib/sample-scenarios";
 import type { ScenarioInput } from "@/lib/types";
 
 
@@ -93,36 +92,6 @@ function coverageFromCounts(counts: number[], total: number) {
   }));
 }
 
-function syncRoomConfigs(current: ScenarioInput["workflowConfig"]["roomConfigs"], nextCount: number) {
-  const trimmed = current.slice(0, nextCount);
-  if (trimmed.length === nextCount) {
-    return trimmed;
-  }
-
-  const additions = Array.from({ length: nextCount - trimmed.length }, (_, index) => ({
-    id: `room-${trimmed.length + index + 1}`,
-    name: `Room ${trimmed.length + index + 1}`,
-    supportedModalities: ["XRAY", "CT", "MRI", "ULTRASOUND"] as ScenarioInput["workflowConfig"]["roomConfigs"][number]["supportedModalities"],
-    dedicatedModality: "NONE" as const
-  }));
-
-  return [...trimmed, ...additions];
-}
-
-function syncChangingRoomConfigs(current: ScenarioInput["workflowConfig"]["changingRoomConfigs"], nextCount: number) {
-  const trimmed = current.slice(0, nextCount);
-  if (trimmed.length === nextCount) {
-    return trimmed;
-  }
-
-  const additions = Array.from({ length: nextCount - trimmed.length }, (_, index) => ({
-    id: `changing-room-${trimmed.length + index + 1}`,
-    name: `Changing Room ${trimmed.length + index + 1}`,
-    gender: "UNISEX" as const
-  }));
-
-  return [...trimmed, ...additions];
-}
 
 function HourlyDemandChart({
   values,

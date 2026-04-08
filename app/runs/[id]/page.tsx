@@ -2,7 +2,6 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { RunStatusPoller } from "@/components/run-status-poller";
 import { RunCompareSelector } from "@/components/run-compare-selector";
-import { SimpleLineChart } from "@/components/simple-chart";
 import { InteractiveCharts } from "@/components/interactive-charts";
 import { InsightCard } from "@/components/insight-card";
 import { MODALITY_LABELS } from "@/lib/constants";

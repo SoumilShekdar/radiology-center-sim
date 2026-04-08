@@ -1,7 +1,7 @@
 import { getBottleneckAdvice } from "@/lib/llm-advisor";
 import { Card, Typography } from "@mui/material";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
-import type { SimulationSummary, ScenarioInput } from "@/lib/types";
+
 
 export async function InsightCard({
   scenarioName,
@@ -10,6 +10,7 @@ export async function InsightCard({
 }: {
   scenarioName: string;
   currency: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   summary: any;
 }) {
   const bottleneck = summary.bottleneck;
@@ -23,7 +24,7 @@ export async function InsightCard({
         currency,
         summary,
       });
-    } catch (e) {
+    } catch {
       advice = "Unable to fetch AI insights at this time.";
     }
   }

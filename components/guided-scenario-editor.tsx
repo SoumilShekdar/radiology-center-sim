@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { 
   Box, Typography, Button, Stack, Stepper, Step, StepLabel, 
-  TextField, FormControl, InputLabel, Select, MenuItem, Paper
+  TextField, FormControl, InputLabel, Select, MenuItem
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import { StaffingGrid } from "@/components/staffing-grid";
