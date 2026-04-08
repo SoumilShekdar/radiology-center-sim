@@ -16,6 +16,12 @@ type Props = {
   valueFormatter?: (value: number) => string;
 };
 
+interface ChartDatum {
+  label: string;
+  value: number;
+  ghostValue?: number;
+}
+
 export function SimpleLineChart({
   title,
   color = "#2563eb",
@@ -26,8 +32,8 @@ export function SimpleLineChart({
   const theme = useTheme();
   
   // Combine real and ghost points for Recharts.
-  const data = points.map((p, i) => {
-    const datum: any = { label: p.label, value: p.value };
+  const data: ChartDatum[] = points.map((p, i) => {
+    const datum: ChartDatum = { label: p.label, value: p.value };
     if (ghostPoints && ghostPoints[i]) {
       datum.ghostValue = ghostPoints[i].value;
     }
@@ -67,7 +73,12 @@ export function SimpleLineChart({
                 boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
                 fontFamily: "var(--font-jetbrains-mono, monospace)"
               }}
-              formatter={(val: number) => [valueFormatter(val), ""]}
+              formatter={(val: number | string | readonly (number | string)[] | undefined) => {
+                if (typeof val === 'number') {
+                  return [valueFormatter(val), ""];
+                }
+                return [val ? String(val) : "", ""];
+              }}
               labelStyle={{ color: theme.palette.text.primary, fontWeight: 600, marginBottom: "4px" }}
             />
             {ghostPoints && (

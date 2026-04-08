@@ -5,7 +5,7 @@ import {
   Box, Typography, Button, Stack, Stepper, Step, StepLabel, 
   TextField, FormControl, InputLabel, Select, MenuItem
 } from "@mui/material";
-import { Activity, Beaker, Magnet, Radio, Tablets, Wind, DoorOpen, BedDouble } from "lucide-react";
+import { Activity, Magnet, Radio, Tablets, Wind, DoorOpen, BedDouble } from "lucide-react";
 import Grid from "@mui/material/Grid";
 import { StaffingGrid } from "@/components/staffing-grid";
 import { SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
