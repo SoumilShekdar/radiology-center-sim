@@ -320,3 +320,8 @@ export async function listOptimizerRunsAction(scenarioId: string) {
   `;
   return rows;
 }
+
+export async function runQuickSimulationAction(scenario: ScenarioInput, horizonDays = 14) {
+  // A fast, stateless, single-iteration simulation for the What-If sliders.
+  return runSimulation(scenario, horizonDays, scenario.seedDefault);
+}

@@ -7,28 +7,36 @@ type Props = {
   title: string;
   color?: string;
   points: Point[];
+  ghostPoints?: Point[];
   valueFormatter?: (value: number) => string;
 };
 
-export function SimpleLineChart({ title, color = "#b55d38", points, valueFormatter = (value) => `${Math.round(value)}` }: Props) {
+export function SimpleLineChart({ title, color = "#b55d38", points, ghostPoints, valueFormatter = (value: number) => `${Math.round(value)}` }: Props) {
   const width = 680;
   const height = 220;
   const padding = 28;
   const leftPadding = 72;
   const bottomPadding = 28;
-  const maxValue = Math.max(...points.map((point) => point.value), 1);
+  const maxValue = Math.max(
+    ...points.map((point) => point.value),
+    ...(ghostPoints ? ghostPoints.map((point) => point.value) : []),
+    1
+  );
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
     ratio,
     value: maxValue * ratio
   }));
 
-  const path = points
+  const mapPath = (pts: Point[]) => pts
     .map((point, index) => {
-      const x = leftPadding + (index / Math.max(points.length - 1, 1)) * (width - leftPadding - padding);
+      const x = leftPadding + (index / Math.max(pts.length - 1, 1)) * (width - leftPadding - padding);
       const y = height - bottomPadding - (point.value / maxValue) * (height - padding - bottomPadding);
       return `${index === 0 ? "M" : "L"} ${x} ${y}`;
     })
     .join(" ");
+
+  const path = mapPath(points);
+  const ghostPath = ghostPoints ? mapPath(ghostPoints) : null;
 
   return (
     <div className="chart">
@@ -47,7 +55,21 @@ export function SimpleLineChart({ title, color = "#b55d38", points, valueFormatt
             </g>
           );
         })}
+        {ghostPath && (
+          <path d={ghostPath} fill="none" stroke="rgba(31, 45, 38, 0.3)" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5,5" />
+        )}
         <path d={path} fill="none" stroke={color} strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />
+        
+        {ghostPoints && ghostPoints.map((point, index) => {
+          const x = leftPadding + (index / Math.max(ghostPoints.length - 1, 1)) * (width - leftPadding - padding);
+          const y = height - bottomPadding - (point.value / maxValue) * (height - padding - bottomPadding);
+          return (
+            <g key={`ghost-${point.label}`}>
+              <circle cx={x} cy={y} r="4.5" fill="rgba(31, 45, 38, 0.3)" />
+            </g>
+          );
+        })}
+
         {points.map((point, index) => {
           const x = leftPadding + (index / Math.max(points.length - 1, 1)) * (width - leftPadding - padding);
           const y = height - bottomPadding - (point.value / maxValue) * (height - padding - bottomPadding);

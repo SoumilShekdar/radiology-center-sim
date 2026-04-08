@@ -187,3 +187,38 @@ export async function getOptimizerAdvice(input: AdvisorInput): Promise<Optimizer
     }
   }
 }
+
+export async function getBottleneckAdvice(input: {
+  scenarioName: string;
+  bottleneck: string;
+  currency: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  summary: any;
+}): Promise<string> {
+  const lostRevenue = input.summary.lostRevenue || 0;
+  const fmtLostRevenue = `${input.currency} ${Math.round(lostRevenue).toLocaleString()}`;
+  
+  const prompt = `You are a radiology department operations consultant advising a manager.
+Based on the simulation results for "${input.scenarioName}", the primary constraining bottleneck is: ${input.bottleneck}.
+
+Current performance:
+- Wait Time P90: ${Math.round(input.summary.p90WaitMinutes)} minutes
+- Machine Utilization: ${Math.round(input.summary.machineUtilization)}%
+- Staff Utilization (Techs / Rads): ${Math.round(input.summary.technicianUtilization)}% / ${Math.round(input.summary.radiologistUtilization)}%
+- Total Lost Revenue: ${fmtLostRevenue}
+
+Provide a 1-2 sentence recommendation on what the manager should do to alleviate the ${input.bottleneck} bottleneck.
+Format your recommendation exactly like this: "Your bottleneck is [Bottleneck]. Recommendation: [Actionable advice]. This could recapture a portion of the ${fmtLostRevenue} lost revenue."
+Be direct, actionable, and focus purely on operational adjustments like staffing, hours, or capital equipment.
+Do not use conversational filler, just provide the advice directly.`;
+
+  try {
+    return await callGemini(prompt);
+  } catch {
+    try {
+      return await callOpenAI(prompt);
+    } catch {
+      return `Your bottleneck is ${input.bottleneck}. Recommendation: Extend operating hours or add more staff/machines to handle the load. This could recapture a portion of the ${fmtLostRevenue} lost revenue.`;
+    }
+  }
+}
