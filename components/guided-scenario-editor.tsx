@@ -5,6 +5,7 @@ import {
   Box, Typography, Button, Stack, Stepper, Step, StepLabel, 
   TextField, FormControl, InputLabel, Select, MenuItem
 } from "@mui/material";
+import { Activity, Magnet, Radio, Tablets, Wind, DoorOpen, BedDouble } from "lucide-react";
 import Grid from "@mui/material/Grid";
 import { StaffingGrid } from "@/components/staffing-grid";
 import { SAMPLE_SCENARIOS } from "@/lib/sample-scenarios";
@@ -141,21 +142,24 @@ export function GuidedScenarioEditor({
           <Typography variant="subtitle2" sx={{ mt: 2 }}>Physical Infrastructure Counts</Typography>
           <Grid container spacing={3}>
             {[
-              ["xRayMachines", "X-Ray machines"],
-              ["ctMachines", "CT scanners"],
-              ["mriMachines", "MRI scanners"],
-              ["portableXRayMachines", "Portable X-Ray machines"],
-              ["ultrasoundMachines", "Ultrasounds"],
-              ["rooms", "Procedure rooms"],
-              ["changingRooms", "Changing rooms"]
-            ].map(([key, label]) => (
-              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key}>
-                <TextField
-                  label={label} fullWidth type="number"
-                  inputProps={{ min: 0 }}
-                  value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
-                  onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, [key]: Number(e.target.value) })}
-                />
+              ["xRayMachines", "X-Ray machines", <Wind size={18} key="xray" />],
+              ["ctMachines", "CT scanners", <Radio size={18} key="ct" />],
+              ["mriMachines", "MRI scanners", <Magnet size={18} key="mri" />],
+              ["portableXRayMachines", "Portable X-Ray machines", <Tablets size={18} key="portable" />],
+              ["ultrasoundMachines", "Ultrasounds", <Activity size={18} key="us" />],
+              ["rooms", "Procedure rooms", <BedDouble size={18} key="rooms" />],
+              ["changingRooms", "Changing rooms", <DoorOpen size={18} key="cr" />]
+            ].map(([key, label, icon]) => (
+              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={key as string}>
+                <Stack direction="row" alignItems="flex-end" spacing={1}>
+                  <Box sx={{ mb: 1, color: 'text.secondary' }}>{icon}</Box>
+                  <TextField
+                    label={label as string} fullWidth type="number"
+                    inputProps={{ min: 0 }}
+                    value={scenario.resourceConfig[key as keyof ScenarioInput["resourceConfig"]]}
+                    onChange={(e) => updateScenario("resourceConfig", { ...scenario.resourceConfig, [key as string]: Number(e.target.value) })}
+                  />
+                </Stack>
               </Grid>
             ))}
           </Grid>
