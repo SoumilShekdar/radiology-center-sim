@@ -15,6 +15,7 @@ import {
   Stack, 
   Paper
 } from "@mui/material";
+import { Activity, Beaker, Magnet, Radio, Tablets, Wind } from "lucide-react";
 import Grid from "@mui/material/Grid";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import Link from "next/link";
@@ -25,6 +26,17 @@ import { runMonteCarloAction, runSimulationAction, saveScenarioAction } from "@/
 import { GuidedScenarioEditor } from "@/components/guided-scenario-editor";
 import { DEFAULT_SCENARIO } from "@/lib/sample-scenarios";
 import type { ScenarioInput } from "@/lib/types";
+
+const ModalityIcon = ({ modality }: { modality: string }) => {
+  switch (modality) {
+    case "CT": return <Radio size={18} />;
+    case "MRI": return <Magnet size={18} />;
+    case "ULTRASOUND": return <Activity size={18} />;
+    case "XRAY": return <Wind size={18} />;
+    case "PORTABLE_XRAY": return <Tablets size={18} />;
+    default: return <Beaker size={18} />;
+  }
+};
 
 
 type Props = {
@@ -792,7 +804,10 @@ export function ScenarioEditor({ initialScenario, mode, viewMode }: Props) {
           {scenario.serviceConfigs.map((service, index) => (
             <Grid size={{ xs: 12, md: 6, lg: 4 }} key={service.modality}>
               <Paper variant="outlined" sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{MODALITY_LABELS[service.modality]}</Typography>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ color: 'text.secondary' }}>
+                  <ModalityIcon modality={service.modality} />
+                  <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>{MODALITY_LABELS[service.modality]}</Typography>
+                </Stack>
                 <TextField
                   label="Charge"
                   fullWidth

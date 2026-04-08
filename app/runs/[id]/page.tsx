@@ -4,6 +4,7 @@ import { RunStatusPoller } from "@/components/run-status-poller";
 import { RunCompareSelector } from "@/components/run-compare-selector";
 import { InteractiveCharts } from "@/components/interactive-charts";
 import { InsightCard } from "@/components/insight-card";
+import { CountUpNumber } from "@/components/count-up";
 import { MODALITY_LABELS } from "@/lib/constants";
 import { formatCurrency } from "@/lib/currency";
 import { prisma } from "@/lib/prisma";
@@ -229,22 +230,22 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
               <MetricCard title="Run Seed" value={summary.mode === "MONTE_CARLO" ? `${summary.seedStart}-${summary.seedEnd}` : run.seed} subtitle={summary.mode === "MONTE_CARLO" ? "Seed range used for sensitivity run." : "Reuse this seed to reproduce."} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <MetricCard title="Possible Revenue" value={formatCurrency(summary.possibleRevenue, currency)} subtitle="Demand-based if everyone retained" />
+              <MetricCard title="Possible Revenue" value={<CountUpNumber value={summary.possibleRevenue} formatType="currency" currencyCode={currency} />} subtitle="Demand-based if everyone retained" />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <MetricCard title="Maximum Revenue" value={formatCurrency(summary.maximumRevenue, currency)} subtitle="Machine ceiling at full util" />
+              <MetricCard title="Maximum Revenue" value={<CountUpNumber value={summary.maximumRevenue} formatType="currency" currencyCode={currency} />} subtitle="Machine ceiling at full util" />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-              <MetricCard title="Actual Revenue" value={formatCurrency(summary.actualRevenue, currency)} subtitle={`Completed patients ${summary.completedPatients}`} />
+              <MetricCard title="Actual Revenue" value={<CountUpNumber value={summary.actualRevenue} formatType="currency" currencyCode={currency} />} subtitle={`Completed patients ${summary.completedPatients}`} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <MetricCard title="Lost Revenue" value={formatCurrency(summary.lostRevenue, currency)} subtitle="Possible minus actual" />
+              <MetricCard title="Lost Revenue" value={<CountUpNumber value={summary.lostRevenue} formatType="currency" currencyCode={currency} />} subtitle="Possible minus actual" />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <MetricCard title="Wait to Perform" value={formatMinutes(summary.p50WaitMinutes)} subtitle={`P90 ${formatMinutes(summary.p90WaitMinutes)}`} />
+              <MetricCard title="Wait to Perform" value={<CountUpNumber value={summary.p50WaitMinutes} formatType="minutes" />} subtitle={`P90 ${formatMinutes(summary.p90WaitMinutes)}`} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6, md: 4 }}>
-              <MetricCard title="Time to Result" value={formatMinutes(summary.p50ResultMinutes)} subtitle={`P90 ${formatMinutes(summary.p90ResultMinutes)}`} />
+              <MetricCard title="Time to Result" value={<CountUpNumber value={summary.p50ResultMinutes} formatType="minutes" />} subtitle={`P90 ${formatMinutes(summary.p90ResultMinutes)}`} />
             </Grid>
           </Grid>
 
@@ -372,7 +373,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
   );
 }
 
-const MetricCard = ({ title, value, subtitle }: { title: string, value: string | number, subtitle: React.ReactNode }) => (
+const MetricCard = ({ title, value, subtitle }: { title: string, value: React.ReactNode, subtitle: React.ReactNode }) => (
   <Card elevation={0} variant="outlined" sx={{ p: 3, height: '100%', display: 'flex', flexDirection: 'column' }}>
     <Typography variant="overline" color="secondary" gutterBottom sx={{ lineHeight: 1.2 }}>{title}</Typography>
     <Typography variant="h3" sx={{ mb: 1, mt: 1 }}>{value}</Typography>
